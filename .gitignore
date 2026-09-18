@@ -1,0 +1,13 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Local environment overrides (.env.example and .env.production are committed)
+.env
+*.local
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
