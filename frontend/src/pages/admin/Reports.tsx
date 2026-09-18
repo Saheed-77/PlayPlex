@@ -130,6 +130,7 @@ export function ReportsPage() {
                 <KpiTile label="Avg session" value={`${s.avgSessionMinutes} min`} />
                 <KpiTile label="Overdue > 5 min" value={s.overdueSessions} tone={s.overdueSessions ? 'soon' : undefined} />
                 <KpiTile label="No-shows · cancelled" value={`${s.noShows} · ${s.cancellations}`} />
+                <KpiTile label="Lost to faults" value={`${s.pausedMinutes} min`} sub={`${s.pausedSessions} session${s.pausedSessions === 1 ? '' : 's'} paused`} tone={s.pausedMinutes > 0 ? 'soon' : undefined} />
                 <KpiTile label="Peak hour" value={s.peakHour ? formatHour(s.peakHour) : '—'} />
               </div>
               <div className="grid gap-6 md:grid-cols-2">
@@ -271,6 +272,7 @@ export function ReportsPage() {
                     <TH className="text-right">Sessions</TH>
                     <TH className="text-right">In use</TH>
                     <TH className="text-right">Available</TH>
+                    <TH className="text-right">Paused</TH>
                     <TH className="text-right">Down</TH>
                     <TH className="w-1/3">Utilisation</TH>
                   </TR>
@@ -282,6 +284,7 @@ export function ReportsPage() {
                       <TD className="text-right tabular-nums">{d.sessions}</TD>
                       <TD className="text-right tabular-nums">{d.minutesInUse} min</TD>
                       <TD className="text-right tabular-nums">{d.minutesAvailable} min</TD>
+                      <TD className={cn('text-right tabular-nums', d.pausedMinutes > 0 && 'text-pause')}>{d.pausedMinutes} min</TD>
                       <TD className={cn('text-right tabular-nums', d.downMinutes > 0 && 'text-soon')}>{d.downMinutes} min</TD>
                       <TD>
                         <div className="flex items-center gap-2">
@@ -431,7 +434,8 @@ export function ReportsPage() {
 // ── A7 Audit log ─────────────────────────────────────────────────────────────
 const ACTIONS = [
   'TICKET_CANCELLED', 'TICKET_UPDATED', 'TICKET_NO_SHOW', 'TICKET_REQUEUED', 'TICKET_WAIVED', 'PRIORITY_BUMPED', 'QUEUE_SKIPPED',
-  'PAYMENT_COLLECTED', 'REFUND_ISSUED', 'SESSION_EXTENDED', 'SESSION_ENDED', 'SESSION_FORCE_ENDED', 'SESSIONS_BULK_ENDED',
+  'PAYMENT_COLLECTED', 'REFUND_ISSUED', 'SESSION_EXTENDED', 'SESSION_PAUSED', 'SESSION_RESUMED', 'SESSION_AUTO_RESUMED', 'SESSION_LOST_TIME',
+  'SESSION_ENDED', 'SESSION_FORCE_ENDED', 'SESSIONS_BULK_ENDED',
   'DEVICE_STATUS_CHANGED', 'DEVICE_CREATED', 'DEVICE_UPDATED', 'DEVICE_DEACTIVATED', 'DEVICE_TYPE_CREATED', 'DEVICE_TYPE_UPDATED',
   'PLAN_CREATED', 'PLAN_UPDATED', 'PLAN_PRICE_CHANGED', 'STAFF_CREATED', 'STAFF_UPDATED', 'STAFF_DEACTIVATED', 'STAFF_REACTIVATED',
   'PASSWORD_RESET', 'SETTINGS_UPDATED', 'SHIFT_ENDED', 'EXPORT_DOWNLOADED',

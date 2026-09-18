@@ -30,13 +30,18 @@ function deviceMinutes(db: Db, d: DbDevice, w: Window) {
   // Devices only count as available once the room opened.
   const start = Math.max(w.start, d.createdAt, db.eventStartedAt)
   const end = w.end
-  if (end <= start) return { inUse: 0, available: 0, down: 0, sessions: 0 }
+  if (end <= start) return { inUse: 0, available: 0, down: 0, paused: 0, sessions: 0 }
   let inUse = 0
+  let paused = 0
   let sessions = 0
   for (const s of db.sessions.filter((x) => x.deviceId === d.id)) {
     const a = Math.max(s.startedAt, start)
     const b = Math.min(s.endedAt ?? end, end)
-    if (b > a) inUse += b - a
+    if (b > a) {
+      inUse += b - a
+      // A paused station was held but not played: don't credit it as utilisation.
+      paused += s.pausedTotalMs + (s.pausedAt === null ? 0 : Math.max(0, Math.min(end, w.end) - Math.max(s.pausedAt, start)))
+    }
     if (inWindow(w, s.startedAt)) sessions++
   }
   let down = 0
@@ -50,7 +55,8 @@ function deviceMinutes(db: Db, d: DbDevice, w: Window) {
   }
   if (since !== null) down += Math.max(0, end - since)
   const available = Math.max(0, end - start - down)
-  return { inUse: Math.min(inUse, available) / MIN, available: available / MIN, down: down / MIN, sessions }
+  const played = Math.max(0, Math.min(inUse, available) - paused)
+  return { inUse: played / MIN, available: available / MIN, down: down / MIN, paused: paused / MIN, sessions }
 }
 
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0)
@@ -103,6 +109,9 @@ function summary(db: Db, now: number, w: Window) {
     medianWaitMinutes: Math.round(median(waits)),
     avgSessionMinutes: ended.length ? Math.round((ended.reduce((n, s) => n + (s.endedAt! - s.startedAt), 0) / ended.length / MIN) * 10) / 10 : 0,
     overdueSessions: db.sessions.filter((s) => inWindow(w, s.startedAt) && (s.endedAt ?? now) - s.plannedEndAt > 5 * MIN).length,
+    pausedMinutes: Math.round(totals.reduce((n, t) => n + t.paused, 0)),
+    // Same rule as the minutes above: any session overlapping the window that was interrupted.
+    pausedSessions: db.sessions.filter((s) => s.startedAt < w.end && (s.endedAt ?? now) > w.start && (s.pausedTotalMs > 0 || s.pausedAt !== null)).length,
     peakHour: peak ? iso(peak[0]) : null,
     registrationsLastHour: db.tickets.filter((t) => t.createdAt > now - 60 * MIN).length,
     byDeviceType: db.deviceTypes.map((type) => {
@@ -176,6 +185,7 @@ function utilization(db: Db, w: Window) {
         minutesAvailable: Math.round(m.available),
         utilizationPct: pct(m.inUse, m.available),
         downMinutes: Math.round(m.down),
+        pausedMinutes: Math.round(m.paused),
       }
     })
   return {

@@ -8,10 +8,16 @@ import type { DeviceStatus, Plan } from '@/types/api'
 
 const NOW = Date.parse('2026-09-14T09:00:00Z')
 const WARN = 5 * 60_000
-const device = (code: string, status: DeviceStatus, endsInMs?: number) => ({
+const device = (code: string, status: DeviceStatus, endsInMs?: number, pausedAtMs?: number) => ({
   code,
   status,
-  session: endsInMs === undefined ? null : { plannedEndAt: new Date(NOW + endsInMs).toISOString() },
+  session:
+    endsInMs === undefined
+      ? null
+      : {
+          plannedEndAt: new Date(NOW + endsInMs).toISOString(),
+          pausedAt: pausedAtMs === undefined ? null : new Date(NOW + pausedAtMs).toISOString(),
+        },
 })
 
 describe('deriveState', () => {
@@ -21,6 +27,25 @@ describe('deriveState', () => {
     const over = deriveState(device('A', 'IN_USE', -200_000), NOW, WARN)
     expect(over.state).toBe('OVERDUE')
     expect(over.remainingMs).toBe(-200_000)
+  })
+
+  it('freezes the countdown while paused, whatever the clock does', () => {
+    // Paused one minute ago with 10 minutes left.
+    const paused = device('A', 'IN_USE', 9 * 60_000, -60_000)
+    const atPause = deriveState(paused, NOW, WARN)
+    expect(atPause.state).toBe('PAUSED')
+    expect(atPause.remainingMs).toBe(10 * 60_000)
+    expect(atPause.pausedForMs).toBe(60_000)
+
+    // Five minutes later the held time is unchanged; only the pause has grown.
+    const later = deriveState(paused, NOW + 5 * 60_000, WARN)
+    expect(later.remainingMs).toBe(10 * 60_000)
+    expect(later.pausedForMs).toBe(6 * 60_000)
+  })
+
+  it('stays paused even once the original end time has passed', () => {
+    const paused = device('A', 'IN_USE', 60_000, -30_000)
+    expect(deriveState(paused, NOW + 10 * 60_000, WARN).state).toBe('PAUSED')
   })
 
   it('maps the non-session statuses', () => {
@@ -46,6 +71,15 @@ describe('sortByUrgency', () => {
       WARN,
     )
     expect(sorted.map((d) => d.code)).toEqual(['LATE-2', 'LATE-1', 'SOON', 'FREE', 'RUN', 'CLEAN', 'OUT'])
+  })
+
+  it('puts a paused station just behind overdue: it is idle while people wait', () => {
+    const sorted = sortByUrgency(
+      [device('RUN', 'IN_USE', 20 * 60_000), device('SOON', 'IN_USE', 60_000), device('HELD', 'IN_USE', 9 * 60_000, -60_000), device('LATE', 'IN_USE', -60_000)],
+      NOW,
+      WARN,
+    )
+    expect(sorted.map((d) => d.code)).toEqual(['LATE', 'HELD', 'SOON', 'RUN'])
   })
 })
 

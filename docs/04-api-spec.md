@@ -303,6 +303,34 @@ Rejects if `minutes > settings.maxExtensionMinutes` or `settings.allowExtensions
 false. `planned_end_at += minutes`, `extension_minutes_total += minutes`,
 `overdue_notified_at` reset to null so the alert can fire again later.
 
+### `POST /api/sessions/{id}/pause` · `/resume` · `/lost-time`
+
+**Role:** VOLUNTEER, ADMIN · **Idempotency-Key: required**
+
+A fault interrupts play for a minute or two. Pausing stops the clock so the student keeps the
+time they paid for, on the station they are already sitting at.
+
+```jsonc
+// POST /api/sessions/91/pause
+{ "reason": "GAME_CRASH", "note": null }   // GAME_CRASH | PERIPHERAL | POWER | NETWORK | OTHER (note required)
+```
+
+- Refuses with `409 INVALID_TRANSITION` if it is already paused, `409 SESSION_ALREADY_ENDED`
+  if it is over, and `422 BUSINESS_RULE_VIOLATED` if the session is already past
+  `planned_end_at` (pause protects time still owed, it is not a source of free minutes) or the
+  budget is spent.
+- **`/resume`** sets `planned_end_at += now() − paused_at`, adds the same amount to
+  `paused_total_seconds`, clears `paused_at`, and resets `overdue_notified_at`.
+- **`/lost-time`** `{minutes, reason}` is the after-the-fact version for a glitch that ended
+  before anyone reached the tablet. It draws on the **same budget**, so an interruption can't be
+  both paused and gifted.
+
+**The budget is what protects the queue.** `settings.max_pause_minutes` (default 5) is the total
+per session, and a `@Scheduled` sweep resumes any session that reaches it — a forgotten pause can
+never hold a station. Every pause, resume, auto-resume and lost-time grant is audit-logged with a
+reason. A fault that outlasts the budget is a `TECH_ISSUE` end, which frees the station and
+requeues the player at priority 1.
+
 ### `POST /api/sessions/{id}/end`
 
 **Role:** VOLUNTEER, ADMIN · **Idempotency-Key: required**
@@ -420,6 +448,8 @@ don't kill idle connections.
 | `device.updated` | `{deviceId, code, status, statusReason}` | Everyone |
 | `session.started` | `{sessionId, deviceId, plannedEndAt, players[]}` | Volunteer, Admin |
 | `session.extended` | `{sessionId, plannedEndAt, minutesAdded}` | Volunteer, Admin |
+| `session.paused` | `{sessionId, deviceId, deviceCode, reason, pausedAt}` | Volunteer, Admin |
+| `session.resumed` | `{sessionId, deviceId, deviceCode, plannedEndAt, automatic}` | Volunteer, Admin |
 | `session.overdue` | `{sessionId, deviceId, deviceCode, overdueSince}` | Volunteer, Admin |
 | `session.ended` | `{sessionId, deviceId, endReason}` | Everyone |
 | `queue.updated` | `{queueLength, byDeviceType:[{id, length, estimatedWaitMinutes}]}` | Everyone |

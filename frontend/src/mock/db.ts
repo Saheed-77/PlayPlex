@@ -1,6 +1,7 @@
 import type {
   DeviceStatus,
   EndReason,
+  PauseReason,
   EventSettings,
   PaymentKind,
   PaymentMethod,
@@ -120,6 +121,11 @@ export interface DbSession {
   endReason: EndReason | null
   endNote: string | null
   extensionMinutesTotal: number
+  /** When the current pause started; null = running (docs/02 interruptions). */
+  pausedAt: number | null
+  /** Pause budget consumed so far, including minutes handed back as lost time. */
+  pausedTotalMs: number
+  pauseReason: PauseReason | null
   overdueNotifiedAt: number | null
   warnedAt: number | null
   startedByUserId: number
@@ -178,7 +184,7 @@ export interface Db {
   shifts: Record<number, number>
 }
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 const KEY = 'ppx.mock.db'
 
 export function nextId(db: Db, table: string): number {

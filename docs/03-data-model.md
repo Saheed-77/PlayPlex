@@ -223,6 +223,9 @@ negative amount*. A ticket's balance is `SUM(amount_paise)`.
 | `end_reason` | `VARCHAR(20)` | `COMPLETED` · `ENDED_EARLY` · `TECH_ISSUE` · `ADMIN_OVERRIDE` |
 | `end_note` | `VARCHAR(200)` | required for `TECH_ISSUE` and `ADMIN_OVERRIDE` |
 | `extension_minutes_total` | `SMALLINT NOT NULL DEFAULT 0` | |
+| `paused_at` | `DATETIME(3)` | set while play is stopped; `NULL` = running |
+| `paused_total_seconds` | `INT NOT NULL DEFAULT 0` | pause budget consumed, including minutes handed back as lost time |
+| `pause_reason` | `VARCHAR(30)` | `GAME_CRASH` · `PERIPHERAL` · `POWER` · `NETWORK` · `OTHER` |
 | `overdue_notified_at` | `DATETIME(3)` | so the scheduled job alerts once, not every 15s |
 | `started_by_user_id` | `BIGINT` FK | |
 | `ended_by_user_id` | `BIGINT` FK, nullable | |
@@ -231,6 +234,12 @@ negative amount*. A ticket's balance is `SUM(amount_paise)`.
 CREATE INDEX ix_session_active ON play_session (ended_at, planned_end_at);
 CREATE INDEX ix_session_started ON play_session (started_at);
 ```
+
+**Pausing keeps the same shape.** A pause is two timestamps, not a state column: while
+`paused_at` is set the client freezes the countdown at `planned_end_at − paused_at`, and on
+resume the server pushes `planned_end_at` forward by exactly the paused duration. Nobody loses
+paid minutes, nobody gains free ones, and the sum of the interruptions is always readable from
+`paused_total_seconds`. See [02-workflows.md §8](02-workflows.md#8-workflow-an-interrupted-session).
 
 There is **no `status` column**. Running / ending-soon / overdue are computed from
 `planned_end_at` and `ended_at` — a column would only be a second source of truth to
@@ -255,7 +264,7 @@ start costs almost nothing and means the PS5 case is not a special case in the c
 |---|---|---|
 | `id` | `BIGINT AUTO_INCREMENT` PK | |
 | `play_session_id` | `BIGINT` FK | |
-| `type` | `VARCHAR(20)` | `STARTED` · `EXTENDED` · `WARNED` · `OVERDUE` · `ENDED` |
+| `type` | `VARCHAR(20)` | `STARTED` · `EXTENDED` · `PAUSED` · `RESUMED` · `WARNED` · `OVERDUE` · `ENDED` |
 | `payload` | `JSON` | e.g. `{"minutes": 15}` |
 | `occurred_at` | `DATETIME(3) NOT NULL` | |
 | `by_user_id` | `BIGINT` FK, nullable | `NULL` for system-generated events |
@@ -303,6 +312,7 @@ through controllers. Log every money-touching, override, and configuration actio
 | `event_name` | `VARCHAR(100)` | `PlayPlex` |
 | `warning_threshold_minutes` | `SMALLINT` | `5` |
 | `cleaning_auto_clear_seconds` | `SMALLINT` | `90` (`0` disables the `CLEANING` state) |
+| `max_pause_minutes` | `SMALLINT` | `5` — pause budget per session (`0` disables pausing) |
 | `allow_extensions` | `BOOLEAN` | `TRUE` |
 | `max_extension_minutes` | `SMALLINT` | `30` |
 | `opening_cash_float_paise` | `INT` | `0` |

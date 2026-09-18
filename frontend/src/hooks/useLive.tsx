@@ -106,6 +106,8 @@ const KEYS_FOR: Record<LiveEvent['type'], string[]> = {
   'device.updated': ['floor', 'admin', 'queue'],
   'session.started': ['floor', 'queue', 'tickets', 'sessions', 'shift'],
   'session.extended': ['floor', 'tickets', 'shift'],
+  'session.paused': ['floor', 'queue', 'shift', 'admin'],
+  'session.resumed': ['floor', 'queue', 'shift', 'admin'],
   'session.overdue': ['floor', 'shift'],
   'session.ended': ['floor', 'queue', 'tickets', 'sessions', 'shift', 'admin'],
   'queue.updated': ['floor', 'queue', 'tickets', 'admin'],

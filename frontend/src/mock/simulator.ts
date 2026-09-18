@@ -73,6 +73,10 @@ function step() {
     } else if (state === 'OVERDUE' && d.session) {
       if (chance(0.12)) act(volunteer, 'POST', `/sessions/${d.session.id}/extend`, { minutes: 15, collectPayment: false }, true)
       else if (chance(0.5)) act(volunteer, 'POST', `/sessions/${d.session.id}/end`, { reason: 'COMPLETED', note: null }, true)
+    } else if (state === 'PAUSED' && chance(0.35)) {
+      act(volunteer, 'POST', `/sessions/${d.session!.id}/resume`, {}, true)
+    } else if ((state === 'RUNNING' || state === 'ENDING_SOON') && chance(0.015)) {
+      act(volunteer, 'POST', `/sessions/${d.session!.id}/pause`, { reason: pick(['GAME_CRASH', 'PERIPHERAL', 'NETWORK']) }, true)
     } else if (state === 'CLEANING' && chance(0.3)) {
       act(volunteer, 'POST', `/devices/${d.id}/ready`)
     } else if (state === 'OUT' && chance(0.04)) {

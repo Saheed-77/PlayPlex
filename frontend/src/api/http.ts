@@ -7,6 +7,8 @@ const EVENT_TYPES: LiveEventType[] = [
   'device.updated',
   'session.started',
   'session.extended',
+  'session.paused',
+  'session.resumed',
   'session.overdue',
   'session.ended',
   'queue.updated',

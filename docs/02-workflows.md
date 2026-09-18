@@ -357,7 +357,55 @@ from a stressed 19-year-old volunteer at 4 pm.
 
 ---
 
-## 8. Workflow: shift handover
+## 8. Workflow: an interrupted session
+
+The game crashes, a controller dies, the power blinks. It is usually over in under five
+minutes, and the student should not pay for time they didn't play.
+
+```mermaid
+flowchart TD
+    A[Play is interrupted] --> B{Is the station itself broken?}
+    B -->|Yes, or it will be a long fault| C[Report a fault<br/>session ends TECH_ISSUE]
+    C --> D[Station freed for the queue<br/>player requeued at priority 1<br/>reception offers a refund]
+    B -->|No, a minute or two| E[Volunteer taps Pause<br/>+ picks a reason]
+    E --> F[Clock stops<br/>remaining time held<br/>station stays theirs]
+    F --> G{Play restarts?}
+    G -->|Yes| H[Volunteer taps Resume]
+    H --> I[planned_end_at moves forward<br/>by exactly the paused time]
+    G -->|Budget spent| J[Timer restarts by itself<br/>audit-logged]
+    J --> I
+    E -.->|Glitch already over| K[Add lost time +1..+5<br/>same budget]
+    K --> I
+```
+
+### 8.1 Why there is a budget
+
+A paused station is an **idle station while people are queueing** — it works directly against
+G1. So pausing is bounded, not trusted:
+
+| Guard | What it does |
+|---|---|
+| `max_pause_minutes` (default **5**) per session | Total across every pause and any lost-time grant, so an interruption can't be both paused and gifted |
+| **Automatic resume at the cap** | A scheduled sweep restarts the clock on the boundary. A forgotten pause cannot hold a station all afternoon |
+| **Paused sits second in the urgency order** | Right behind overdue, and on the alert rail with an inline Resume — it can't be missed from two metres |
+| **Wait estimates assume it resumes now** | The queue is never told a held station frees up sooner than it can |
+| **Refused once the time is up** | A session past `planned_end_at` can't be paused; pause protects time still owed, it isn't a source of free minutes |
+| **Technical reasons only, all audited** | `GAME_CRASH` · `PERIPHERAL` · `POWER` · `NETWORK` · `OTHER` (+ note). No "stepped away": the queue shouldn't pay for a personal break |
+| **Reports total paused minutes per device** | A flaky machine shows up as lost minutes and gets pulled, instead of quietly eating the day |
+
+### 8.2 Who does what
+
+1. Volunteer taps **Pause** and picks a reason. The card turns violet and the countdown freezes.
+2. The room is fixed; volunteer taps **Resume** (one tap, no confirmation — the queue is waiting).
+   `planned_end_at` moves forward by exactly the paused duration.
+3. If nobody resumes it, the timer restarts by itself at the budget and the board says so.
+4. If the fault outlasts the budget, it stops being a pause: report the device, which ends the
+   session as `TECH_ISSUE`, frees the station and requeues the player at priority 1 (§7).
+
+Reception is not involved: no money changes hands. A pause never charges the student anything
+and never refunds anything — it only moves the clock.
+
+## 9. Workflow: shift handover
 
 Volunteers rotate. Handover is a five-line checklist, not a conversation:
 
@@ -374,7 +422,7 @@ This works because no state was ever local. That's the payoff for the timer desi
 
 ---
 
-## 9. Workflow: opening and closing the day
+## 10. Workflow: opening and closing the day
 
 ### Opening (T−30 minutes)
 
@@ -399,7 +447,7 @@ This works because no state was ever local. That's the payoff for the timer desi
 
 ---
 
-## 10. Edge cases the build MUST handle
+## 11. Edge cases the build MUST handle
 
 Decide these now, in a doc, rather than at 4 pm on event day with a queue forming.
 
@@ -413,6 +461,7 @@ Decide these now, in a doc, rather than at 4 pm on event day with a queue formin
 | E6 | Admin edits a plan's price mid-event | Only affects tickets sold *after* the edit. Existing tickets keep their snapshot |
 | E7 | Device deleted while a session is running | Blocked. Admin must end the session first. Devices are **soft-deleted** (`active = false`) so historical reports still resolve `LAP-07` |
 | E8 | Student wants to swap laptop → PS5 while queued | Reception edits the ticket's preference. Fare difference is a new payment row |
+| E8b | Game crashes for two minutes mid-session | Volunteer pauses; the clock stops and the remaining time is held. Resume adds back exactly the paused duration. Capped at 5 minutes per session, then the timer restarts by itself (§8) |
 | E9 | Session runs 20 minutes overdue because nobody ended it | The card is red at the top of the board the whole time. The daily report lists every overdue session and by how much |
 | E10 | Duplicate registration (same phone, twice, same day) | Allowed — a student can genuinely buy two turns. Reception sees an inline hint: *"This student already has an active ticket: PPX-0042"* |
 | E11 | Cash box and report disagree at close | The audit log has every payment with the collector's name and a timestamp. Filter by collector to find the gap |

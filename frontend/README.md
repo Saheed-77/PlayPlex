@@ -24,8 +24,8 @@ All passwords are `demo1234`. The login page lists them.
 | `newbie` | Volunteer | Forced password change |
 
 The seed is a mid-event snapshot: about five hours of history, an overdue laptop, two sessions
-ending soon, a cleaning station, `LAP-07` out of service, 12 people waiting, and dues on the
-Dues tab.
+ending soon, a cleaning station, `LAP-07` out of service, `PC-01` paused mid-fault, 12 people
+waiting, and dues on the Dues tab.
 
 ## Demo controls — `?demo=1`
 

@@ -86,6 +86,7 @@ const badgeTones = {
   over: 'bg-over-bg text-over',
   clean: 'bg-clean-bg text-clean',
   out: 'bg-out-bg text-out',
+  pause: 'bg-pause-bg text-pause',
   primary: 'bg-primary/15 text-primary',
 } as const
 

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ListOrdered, Plus, Square, TriangleAlert } from 'lucide-react'
+import { ListOrdered, Pause, Play, Plus, Square, TriangleAlert } from 'lucide-react'
 import type { FloorDevice } from '@/types/api'
 import { devicesApi } from '@/api/devices'
+import { sessionsApi } from '@/api/sessions'
 import { useApiMutation, useFloor } from '@/hooks/queries'
 import { useServerNow } from '@/hooks/useServerNow'
 import { useCanAct } from '@/hooks/useConnection'
@@ -13,14 +14,14 @@ import { deriveState, sortByUrgency, type VisualState } from '@/lib/deviceState'
 import { DeviceTypeIcon } from '@/lib/icons'
 import { formatDuration } from '@/lib/time'
 import { canOperateFloor } from '@/lib/roles'
-import { cn } from '@/lib/utils'
+import { cn, uuid } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/overlays'
 import { EmptyState, ErrorState, LoadingRows } from '@/components/common/common'
 import { DeviceCard, type DeviceActions } from './DeviceCard'
 import { QueuePanel } from './QueuePanel'
 import { AssignSheet } from './AssignSheet'
-import { EndDialog, ExtendDialog, FaultDialog } from './SessionDialogs'
+import { EndDialog, ExtendDialog, FaultDialog, LostTimeDialog, PauseDialog } from './SessionDialogs'
 
 /**
  * V1 — the floor board. Queue on the left, devices on the right, ordered by urgency.
@@ -41,6 +42,8 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
   const [ending, setEnding] = useState<{ device: FloorDevice; forced: boolean } | null>(null)
   const [extending, setExtending] = useState<{ device: FloorDevice; minutes: number } | null>(null)
   const [faulting, setFaulting] = useState<FloorDevice | null>(null)
+  const [pausing, setPausing] = useState<FloorDevice | null>(null)
+  const [lostTime, setLostTime] = useState<FloorDevice | null>(null)
 
   const settings = floor.data?.settings
   const warningMs = (settings?.warningThresholdMinutes ?? 5) * 60_000
@@ -54,8 +57,21 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
   const cleaning = useApiMutation((d: FloorDevice) => devicesApi.setStatus(d.id, 'CLEANING', null), {
     onSuccess: (_, d) => toast.success(`${d.code} marked for cleaning`),
   })
+  // Resume is one tap, no dialog: the queue is waiting on it.
+  const resume = useApiMutation((d: FloorDevice) => sessionsApi.resume(d.session!.id, uuid()), {
+    onSuccess: (_, d) => {
+      toast.success(`${d.code} resumed`, { description: 'The time lost to the fault has been added back.' })
+      announce(`${d.code} resumed`)
+    },
+  })
 
   const extensionLeft = (d: FloorDevice) => (settings?.allowExtensions ? settings.maxExtensionMinutes - (d.session?.extensionMinutesTotal ?? 0) : 0)
+  const maxPauseMs = (settings?.maxPauseMinutes ?? 0) * 60_000
+  const pauseLeftMs = (d: FloorDevice | null) => {
+    if (!d?.session) return 0
+    const running = d.session.pausedAt ? now - +new Date(d.session.pausedAt) : 0
+    return Math.max(0, maxPauseMs - d.session.pausedSecondsTotal * 1000 - running)
+  }
 
   const actions: DeviceActions = {
     onAssign: setAssigning,
@@ -64,6 +80,9 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
     onReady: (d) => ready.mutate(d),
     onFixed: (d) => fixed.mutate(d),
     onStatus: (d, status) => (status === 'CLEANING' ? cleaning.mutate(d) : setFaulting(d)),
+    onPause: setPausing,
+    onResume: (d) => resume.mutate(d),
+    onLostTime: setLostTime,
     onForceEnd: user.role === 'ADMIN' ? (device) => setEnding({ device, forced: true }) : undefined,
   }
 
@@ -72,7 +91,11 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
     () => sortByUrgency(devices.filter((d) => typeFilter === null || d.deviceTypeId === typeFilter), now, warningMs),
     [devices, typeFilter, now, warningMs],
   )
-  const overdue = useMemo(() => sortByUrgency(devices, now, warningMs).filter((d) => deriveState(d, now, warningMs).state === 'OVERDUE'), [devices, now, warningMs])
+  // Overdue and paused both mean a station needs a volunteer right now.
+  const needsAttention = useMemo(
+    () => sortByUrgency(devices, now, warningMs).filter((d) => ['OVERDUE', 'PAUSED'].includes(deriveState(d, now, warningMs).state)),
+    [devices, now, warningMs],
+  )
 
   useStateAnnouncements(devices, now, warningMs, operable)
 
@@ -111,7 +134,7 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
       ) : (
         <div className={cn('grid gap-3', compact ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-5' : 'grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4')}>
           {visible.map((d) => (
-            <DeviceCard key={d.id} device={d} now={now} warningMs={warningMs} operable={operable} canAct={canAct} extendable={extensionLeft(d) >= 15} actions={actions} />
+            <DeviceCard key={d.id} device={d} now={now} warningMs={warningMs} operable={operable} canAct={canAct} extendable={extensionLeft(d) >= 15} maxPauseMs={maxPauseMs} actions={actions} />
           ))}
         </div>
       )}
@@ -122,8 +145,17 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
 
   return (
     <div>
-      {overdue.length > 0 && (
-        <AlertRail devices={overdue} now={now} operable={operable} canAct={canAct} canExtend={(d) => extensionLeft(d) >= 15} actions={actions} />
+      {needsAttention.length > 0 && (
+        <AlertRail
+          devices={needsAttention}
+          now={now}
+          warningMs={warningMs}
+          operable={operable}
+          canAct={canAct}
+          canExtend={(d) => extensionLeft(d) >= 15}
+          pauseLeftMs={pauseLeftMs}
+          actions={actions}
+        />
       )}
 
       {desktop ? (
@@ -171,32 +203,80 @@ export function FloorBoardView({ readOnly = false, compact = false }: { readOnly
             onClose={() => setExtending(null)}
           />
           <FaultDialog device={faulting} onClose={() => setFaulting(null)} />
+          <PauseDialog device={pausing} budgetLeftMs={pauseLeftMs(pausing)} onClose={() => setPausing(null)} />
+          <LostTimeDialog device={lostTime} budgetLeftMs={pauseLeftMs(lostTime)} onClose={() => setLostTime(null)} />
         </>
       )}
     </div>
   )
 }
 
-/** Every overdue session with inline End/+15. Hidden entirely when nothing is wrong. */
-function AlertRail({ devices, now, operable, canAct, canExtend, actions }: { devices: FloorDevice[]; now: number; operable: boolean; canAct: boolean; canExtend: (d: FloorDevice) => boolean; actions: DeviceActions }) {
+/**
+ * Every session that needs a volunteer now: overdue, and paused — a paused station is an
+ * idle station while people queue. Hidden entirely when nothing is wrong.
+ */
+function AlertRail({
+  devices,
+  now,
+  warningMs,
+  operable,
+  canAct,
+  canExtend,
+  pauseLeftMs,
+  actions,
+}: {
+  devices: FloorDevice[]
+  now: number
+  warningMs: number
+  operable: boolean
+  canAct: boolean
+  canExtend: (d: FloorDevice) => boolean
+  pauseLeftMs: (d: FloorDevice) => number
+  actions: DeviceActions
+}) {
   return (
     <div role="alert" className="mb-4 grid gap-2">
       {devices.map((d) => {
-        const over = now - +new Date(d.session!.plannedEndAt)
+        const { state, pausedForMs } = deriveState(d, now, warningMs)
+        const players = d.session!.players.map((p) => p.displayName).join(' & ')
+        const paused = state === 'PAUSED'
         return (
-          <div key={d.id} className="flex flex-wrap items-center gap-2 rounded-xl border-2 border-over bg-over-bg px-3 py-2 motion-safe:animate-banner-in">
-            <TriangleAlert className="size-5 shrink-0 text-over" aria-hidden />
+          <div
+            key={d.id}
+            className={cn(
+              'flex flex-wrap items-center gap-2 rounded-xl border-2 px-3 py-2 motion-safe:animate-banner-in',
+              paused ? 'border-pause bg-pause-bg' : 'border-over bg-over-bg',
+            )}
+          >
+            {paused ? <Pause className="size-5 shrink-0 text-pause" aria-hidden /> : <TriangleAlert className="size-5 shrink-0 text-over" aria-hidden />}
             <p className="min-w-0 flex-1 text-sm sm:text-base">
-              <strong>{d.code}</strong> is <strong className="tabular-nums text-over">{formatDuration(over)}</strong> overdue — {d.session!.players.map((p) => p.displayName).join(' & ')}
+              {paused ? (
+                <>
+                  <strong>{d.code}</strong> paused <strong className="tabular-nums text-pause">{formatDuration(pausedForMs ?? 0)}</strong> — {players} ·{' '}
+                  <span className="text-muted-foreground">restarts by itself in {formatDuration(pauseLeftMs(d))}</span>
+                </>
+              ) : (
+                <>
+                  <strong>{d.code}</strong> is <strong className="tabular-nums text-over">{formatDuration(now - +new Date(d.session!.plannedEndAt))}</strong> overdue — {players}
+                </>
+              )}
             </p>
             {operable && (
               <div className="flex gap-2">
-                <Button size="sm" variant="destructive" disabled={!canAct} onClick={() => actions.onEnd(d)}>
-                  <Square /> End
-                </Button>
-                <Button size="sm" variant="outline" disabled={!canAct || !canExtend(d)} onClick={() => actions.onExtend(d, 15)}>
-                  <Plus /> 15
-                </Button>
+                {paused ? (
+                  <Button size="sm" disabled={!canAct} onClick={() => actions.onResume(d)}>
+                    <Play /> Resume
+                  </Button>
+                ) : (
+                  <>
+                    <Button size="sm" variant="destructive" disabled={!canAct} onClick={() => actions.onEnd(d)}>
+                      <Square /> End
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={!canAct || !canExtend(d)} onClick={() => actions.onExtend(d, 15)}>
+                      <Plus /> 15
+                    </Button>
+                  </>
+                )}
               </div>
             )}
           </div>

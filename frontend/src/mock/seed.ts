@@ -44,6 +44,7 @@ export function createSeed(now: number): Db {
       eventName: 'PlayPlex 2026',
       warningThresholdMinutes: 5,
       cleaningAutoClearSeconds: 90,
+      maxPauseMinutes: 5,
       allowExtensions: true,
       maxExtensionMinutes: 30,
       openingCashFloatPaise: 200_000,
@@ -236,6 +237,9 @@ export function createSeed(now: number): Db {
       endReason: opts.endedAt ? (opts.endReason ?? 'COMPLETED') : null,
       endNote: opts.endReason === 'TECH_ISSUE' ? 'Controller disconnected repeatedly' : null,
       extensionMinutesTotal: extension,
+      pausedAt: null,
+      pausedTotalMs: 0,
+      pauseReason: null,
       overdueNotifiedAt: null,
       warnedAt: null,
       startedByUserId: opts.by ?? pick(volunteers).id,
@@ -358,6 +362,12 @@ export function createSeed(now: number): Db {
   live(laps[5], standard, ['Vivek Pillai'], 21 * 60, { pref: null, by: meera.id })
   live(laps[7], marathon, ['Tara Joseph'], 38 * 60, { by: meera.id })
   live(laps[9], standard, ['Nitin Rao'], 2 * 60 + 40, { by: arun.id }) // second ending-soon
+  // PC-01's game crashed 70 seconds ago: the clock is stopped and its time is safe.
+  const pcSession = db.sessions.find((s) => s.deviceId === pc.id && s.endedAt === null)
+  if (pcSession) {
+    pcSession.pausedAt = now - 70_000
+    pcSession.pauseReason = 'GAME_CRASH'
+  }
   at(laps[2], 'CLEANING', now - 45_000) // LAP-03 cleaning 0:45
   at(laps[6], 'OUT_OF_SERVICE', now - 41 * MIN, 'Charger dead') // LAP-07 down for 41 min
   // LAP-05, LAP-09 stay AVAILABLE; LAP-05 shows "Next up: Nithya".

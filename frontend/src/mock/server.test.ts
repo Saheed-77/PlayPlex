@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Floor, QueueResponse, Ticket } from '@/types/api'
+import type { AuditEntry, Floor, Page, QueueResponse, Ticket } from '@/types/api'
 import { Problem } from './router'
-import { handle, resetDb, userIdByUsername } from './server'
+import { handle, resetDb, tick, userIdByUsername } from './server'
 
 // Business rules of the mock backend, which mirror docs/02 and docs/04. These are the
 // same guards the Spring backend must implement, so they double as a spec checklist.
@@ -164,5 +164,97 @@ describe('money', () => {
     call('admin', 'PATCH', `/admin/plans/${before.plan.id}`, { pricePaise: before.plan.pricePaise + 1000 })
     const after = call<Ticket>('priya', 'GET', '/tickets/1')
     expect(after.plan.pricePaise).toBe(before.plan.pricePaise)
+  })
+})
+
+describe('pause', () => {
+  const runningDevice = (code = 'LAP-06') => call<Floor>('meera', 'GET', '/floor').devices.find((d) => d.code === code)!
+
+  it('hands every paused second back and takes none', () => {
+    const before = runningDevice()
+    const plannedEnd = Date.parse(before.session!.plannedEndAt)
+    call('meera', 'POST', `/sessions/${before.session!.id}/pause`, { reason: 'GAME_CRASH' }, 'p1')
+    expect(runningDevice().session!.pausedAt).not.toBeNull()
+
+    now += 3 * 60_000 + 20_000
+    call('meera', 'POST', `/sessions/${before.session!.id}/resume`, {}, 'p2')
+    const after = runningDevice()
+    expect(after.session!.pausedAt).toBeNull()
+    expect(Date.parse(after.session!.plannedEndAt) - plannedEnd).toBe(3 * 60_000 + 20_000)
+    expect(after.session!.pausedSecondsTotal).toBe(200)
+  })
+
+  it('caps the budget across several pauses', () => {
+    const s = runningDevice().session!
+    call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'NETWORK' }, 'a1')
+    now += 4 * 60_000
+    call('meera', 'POST', `/sessions/${s.id}/resume`, {}, 'a2')
+    // 1 minute of budget left: a second pause is allowed...
+    call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'NETWORK' }, 'a3')
+    now += 90_000
+    // ...and the sweep resumes it exactly at the 5-minute cap, not later.
+    const events = tick(now)
+    const resumed = runningDevice()
+    expect(resumed.session!.pausedAt).toBeNull()
+    expect(resumed.session!.pausedSecondsTotal).toBe(5 * 60)
+    expect(events.some((e) => e.type === 'session.resumed')).toBe(true)
+    const log = call<Page<AuditEntry>>('admin', 'GET', '/admin/audit-log', undefined, undefined, { action: 'SESSION_AUTO_RESUMED' })
+    expect(log.content.some((e) => e.entityLabel === 'LAP-06')).toBe(true)
+
+    // Budget spent: no more pausing, and no lost-time top-up either.
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'POWER' }, 'a4')).code).toBe('BUSINESS_RULE_VIOLATED')
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/lost-time`, { minutes: 1, reason: 'POWER' }, 'a5')).code).toBe('BUSINESS_RULE_VIOLATED')
+  })
+
+  it('refuses to pause a session that is already out of time', () => {
+    const overdue = call<Floor>('meera', 'GET', '/floor').devices.find((d) => d.code === 'LAP-02')!
+    const p = problem(() => call('meera', 'POST', `/sessions/${overdue.session!.id}/pause`, { reason: 'POWER' }, 'o1'))
+    expect(p.code).toBe('BUSINESS_RULE_VIOLATED')
+  })
+
+  it('refuses a second pause, and a resume when nothing is paused', () => {
+    const s = runningDevice().session!
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/resume`, {}, 'b0')).code).toBe('INVALID_TRANSITION')
+    call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'PERIPHERAL' }, 'b1')
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'PERIPHERAL' }, 'b2')).code).toBe('INVALID_TRANSITION')
+    call('meera', 'POST', `/sessions/${s.id}/resume`, {}, 'b3')
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/resume`, {}, 'b4')).code).toBe('INVALID_TRANSITION')
+  })
+
+  it('needs a real reason, and a note when it is "other"', () => {
+    const s = runningDevice().session!
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/pause`, {}, 'c1')).code).toBe('VALIDATION_FAILED')
+    expect(problem(() => call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'OTHER' }, 'c2')).code).toBe('VALIDATION_FAILED')
+    expect(call('meera', 'POST', `/sessions/${s.id}/pause`, { reason: 'OTHER', note: 'Projector fuse blew' }, 'c3')).toBeTruthy()
+  })
+
+  it('keeps reception out of it', () => {
+    const s = runningDevice().session!
+    expect(problem(() => call('priya', 'POST', `/sessions/${s.id}/pause`, { reason: 'POWER' }, 'd1')).status).toBe(403)
+  })
+
+  it('gives lost minutes back from the same budget', () => {
+    const before = runningDevice()
+    const plannedEnd = Date.parse(before.session!.plannedEndAt)
+    call('meera', 'POST', `/sessions/${before.session!.id}/lost-time`, { minutes: 2, reason: 'GAME_CRASH' }, 'e1')
+    const after = runningDevice()
+    expect(Date.parse(after.session!.plannedEndAt) - plannedEnd).toBe(2 * 60_000)
+    expect(after.session!.pausedSecondsTotal).toBe(120)
+    // Only 3 of the 5 minutes are left.
+    expect(problem(() => call('meera', 'POST', `/sessions/${before.session!.id}/lost-time`, { minutes: 5, reason: 'GAME_CRASH' }, 'e2')).code).toBe('BUSINESS_RULE_VIOLATED')
+  })
+
+  it('never lets a paused station look free sooner than it can be', () => {
+    // PC is a single-station type and PC-01 is seeded mid-pause, so its estimate is
+    // exactly that station's slot. A paused clock must not tick down towards free.
+    const pcWait = () => call<Floor>('meera', 'GET', '/floor').byDeviceType.find((t) => t.code === 'PC')!.estimatedWaitMinutes
+    const before = pcWait()
+    now += 3 * 60_000
+    expect(pcWait()).toBe(before)
+    // Once it resumes, time starts counting down again.
+    const pc = call<Floor>('meera', 'GET', '/floor').devices.find((d) => d.code === 'PC-01')!
+    call('meera', 'POST', `/sessions/${pc.session!.id}/resume`, {}, 'f1')
+    now += 5 * 60_000
+    expect(pcWait()).toBeLessThan(before)
   })
 })

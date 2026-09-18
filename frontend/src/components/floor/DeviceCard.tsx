@@ -1,4 +1,4 @@
-import { Ban, Circle, EllipsisVertical, Play, Plus, Sparkles, Square, Star, Timer, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react'
+import { Ban, Circle, EllipsisVertical, Hourglass, Pause, Play, Plus, Sparkles, Square, Star, Timer, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react'
 import type { FloorDevice } from '@/types/api'
 import { deriveState, type VisualState } from '@/lib/deviceState'
 import { formatClock, formatDuration } from '@/lib/time'
@@ -11,6 +11,7 @@ import { Countdown } from './Countdown'
 // Colour + icon + label for every state (docs/05 §1, P2).
 export const STATE_STYLE: Record<VisualState, { icon: LucideIcon; label: string; card: string; accent: string }> = {
   OVERDUE: { icon: TriangleAlert, label: 'Overdue', card: 'bg-over-bg border-over motion-safe:animate-alarm', accent: 'text-over' },
+  PAUSED: { icon: Pause, label: 'Paused', card: 'bg-pause-bg border-pause', accent: 'text-pause' },
   ENDING_SOON: { icon: Timer, label: 'Ending soon', card: 'bg-soon-bg border-soon motion-safe:animate-soft-pulse', accent: 'text-soon' },
   FREE: { icon: Circle, label: 'Free', card: 'bg-free-bg border-free/60', accent: 'text-free' },
   RUNNING: { icon: Play, label: 'In use', card: 'bg-run-bg border-run/30', accent: 'text-run' },
@@ -25,6 +26,9 @@ export interface DeviceActions {
   onReady: (d: FloorDevice) => void
   onFixed: (d: FloorDevice) => void
   onStatus: (d: FloorDevice, status: 'CLEANING' | 'OUT_OF_SERVICE') => void
+  onPause: (d: FloorDevice) => void
+  onResume: (d: FloorDevice) => void
+  onLostTime: (d: FloorDevice) => void
   onForceEnd?: (d: FloorDevice) => void
 }
 
@@ -37,17 +41,22 @@ interface Props {
   /** Connection allows acting right now. */
   canAct: boolean
   extendable: boolean
+  /** Pause budget for one session; 0 means pausing is switched off. */
+  maxPauseMs: number
   actions: DeviceActions
 }
 
-export function DeviceCard({ device, now, warningMs, operable, canAct, extendable, actions }: Props) {
-  const { state, remainingMs } = deriveState(device, now, warningMs)
+export function DeviceCard({ device, now, warningMs, operable, canAct, extendable, maxPauseMs, actions }: Props) {
+  const { state, remainingMs, pausedForMs } = deriveState(device, now, warningMs)
   const style = STATE_STYLE[state]
   const Icon = style.icon
   const s = device.session
   const players = s?.players ?? []
   const owes = players.some((p) => p.paymentStatus === 'PAYMENT_DUE')
   const disabled = !canAct
+  // Budget left for this session, counting the pause currently running.
+  const pauseLeftMs = s ? Math.max(0, maxPauseMs - s.pausedSecondsTotal * 1000 - (pausedForMs ?? 0)) : 0
+  const pausable = maxPauseMs > 0 && pauseLeftMs > 0 && (state === 'RUNNING' || state === 'ENDING_SOON')
 
   return (
     <article
@@ -84,6 +93,11 @@ export function DeviceCard({ device, now, warningMs, operable, canAct, extendabl
                   <Wrench /> Report a fault…
                 </DropdownMenuItem>
               )}
+              {s && state !== 'PAUSED' && maxPauseMs > 0 && (
+                <DropdownMenuItem disabled={pauseLeftMs < 60_000} onSelect={() => actions.onLostTime(device)}>
+                  <Hourglass /> Add lost time…
+                </DropdownMenuItem>
+              )}
               {s && actions.onForceEnd && (
                 <>
                   <DropdownMenuSeparator />
@@ -113,6 +127,11 @@ export function DeviceCard({ device, now, warningMs, operable, canAct, extendabl
           </>
         )}
         <span className={cn('mt-1 text-[11px] font-bold uppercase tracking-widest', style.accent)}>{state === 'FREE' || state === 'CLEANING' || state === 'OUT' ? '' : style.label}</span>
+        {state === 'PAUSED' && (
+          <span className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+            held · paused {formatDuration(pausedForMs ?? 0)} of {formatDuration(maxPauseMs)}
+          </span>
+        )}
       </div>
 
       <div className="mb-3 min-h-11 text-sm">
@@ -147,8 +166,17 @@ export function DeviceCard({ device, now, warningMs, operable, canAct, extendabl
       </div>
 
       {operable && (
-        <footer className="grid grid-cols-2 gap-2">
-          {s ? (
+        <footer className={cn('grid gap-2', state === 'PAUSED' || pausable ? 'grid-cols-3' : 'grid-cols-2')}>
+          {state === 'PAUSED' ? (
+            <>
+              <Button className="col-span-2" disabled={disabled} onClick={() => actions.onResume(device)}>
+                <Play /> Resume
+              </Button>
+              <Button variant="secondary" disabled={disabled} onClick={() => actions.onEnd(device)}>
+                <Square /> End
+              </Button>
+            </>
+          ) : s ? (
             <>
               <Button variant={state === 'OVERDUE' ? 'destructive' : 'secondary'} disabled={disabled} onClick={() => actions.onEnd(device)}>
                 <Square /> End
@@ -156,6 +184,12 @@ export function DeviceCard({ device, now, warningMs, operable, canAct, extendabl
               <Button variant="outline" disabled={disabled || !extendable} onClick={() => actions.onExtend(device, 15)} title={extendable ? undefined : 'No more extension time available'}>
                 <Plus /> 15
               </Button>
+              {/* Pause sits in the footer, not the overflow menu: during an outage every tap counts. */}
+              {pausable && (
+                <Button variant="outline" disabled={disabled} onClick={() => actions.onPause(device)} title={`Stop the clock · ${formatDuration(pauseLeftMs)} of pause left`}>
+                  <Pause /> Pause
+                </Button>
+              )}
             </>
           ) : state === 'FREE' ? (
             <Button className="col-span-2" disabled={disabled} onClick={() => actions.onAssign(device)}>

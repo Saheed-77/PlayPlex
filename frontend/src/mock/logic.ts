@@ -99,7 +99,11 @@ export function simulateQueue(db: Db, now: number) {
     if (d.status === 'CLEANING') at = Math.max(now, d.statusChangedAt + cleanMs)
     if (d.status === 'IN_USE') {
       const s = activeSessionFor(db, d.id)
-      at = Math.max(now + MIN, (s?.plannedEndAt ?? now) + cleanMs)
+      // A paused session is assumed to resume right now: never promise the station
+      // sooner than it can free up, and never inflate the queue by a pause that is
+      // capped anyway (docs/02 interruptions).
+      const endsAt = s?.pausedAt ? now + (s.plannedEndAt - s.pausedAt) : (s?.plannedEndAt ?? now)
+      at = Math.max(now + MIN, endsAt + cleanMs)
     }
     slots.push({ typeId: d.deviceTypeId, at })
   }
@@ -142,6 +146,9 @@ function floorSession(db: Db, s: DbSession, role: Role): FloorSession {
     startedAt: iso(s.startedAt),
     plannedEndAt: iso(s.plannedEndAt),
     extensionMinutesTotal: s.extensionMinutesTotal,
+    pausedAt: isoOrNull(s.pausedAt),
+    pausedSecondsTotal: Math.round(s.pausedTotalMs / 1000),
+    pauseReason: s.pauseReason,
     startedByName: staffName(db, s.startedByUserId),
     players: sessionTickets(db, s.id).map((t, i) => {
       const student = byId(db.students, t.studentId)!
@@ -355,6 +362,8 @@ export function sessionSummary(db: Db, s: DbSession, role: Role): SessionSummary
     endedAt: isoOrNull(s.endedAt),
     endReason: s.endReason,
     extensionMinutesTotal: s.extensionMinutesTotal,
+    pausedAt: isoOrNull(s.pausedAt),
+    pausedSecondsTotal: Math.round(s.pausedTotalMs / 1000),
     playerNames: tickets.map((t) => {
       const name = byId(db.students, t.studentId)!.fullName
       return isVolunteer(role) ? firstName(name) : name

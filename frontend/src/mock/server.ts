@@ -1,4 +1,4 @@
-import type { DeviceStatus, EndReason, LiveEvent, PaymentMethod, Role, SkipReason } from '@/types/api'
+import type { DeviceStatus, EndReason, LiveEvent, PauseReason, PaymentMethod, Role, SkipReason } from '@/types/api'
 import { fail, type Body, type Ctx, type RouteDef } from './router'
 import { firstName } from '@/lib/utils'
 import { clearDb, loadDb, nextId, saveDb, type Db, type DbDevice, type DbSession, type DbStaff, type DbTicket } from './db'
@@ -184,7 +184,21 @@ export function runJobs(db: Db, now: number, events: LiveEvent[]): boolean {
     }
   }
   for (const s of db.sessions) {
-    if (s.endedAt === null && s.plannedEndAt < now && s.overdueNotifiedAt === null) {
+    // A forgotten pause must never hold a station: resume it at the budget boundary.
+    if (s.endedAt === null && s.pausedAt !== null && pauseBudgetLeft(db, s, now) === 0) {
+      const resumeAt = s.pausedAt + Math.max(0, db.settings.maxPauseMinutes * MIN - s.pausedTotalMs)
+      const device = byId(db.devices, s.deviceId)!
+      resumeSession(s, resumeAt)
+      db.audit.push({
+        id: nextId(db, 'audit'), actorUserId: 0, action: 'SESSION_AUTO_RESUMED', entityType: 'play_session',
+        entityId: s.id, entityLabel: device.code, before: null,
+        after: { reason: 'Pause budget spent', maxPauseMinutes: db.settings.maxPauseMinutes }, occurredAt: resumeAt,
+      })
+      events.push({ type: 'session.resumed', data: { sessionId: s.id, deviceId: device.id, deviceCode: device.code, plannedEndAt: iso(s.plannedEndAt), automatic: true } })
+      events.push({ type: 'queue.updated', data: queueEvent(db) })
+      changed = true
+    }
+    if (s.endedAt === null && s.pausedAt === null && s.plannedEndAt < now && s.overdueNotifiedAt === null) {
       // Fire once, not every sweep (docs/07 §3.11).
       s.overdueNotifiedAt = now
       const d = byId(db.devices, s.deviceId)!
@@ -271,6 +285,29 @@ function endSession(ctx: Ctx, s: DbSession, reason: EndReason, note: string | nu
   ctx.emit('device.updated', deviceEvent(device))
   ctx.emit('queue.updated', queueEvent(db))
   return sessionSummary(db, s, user.role)
+}
+
+const PAUSE_REASONS: PauseReason[] = ['GAME_CRASH', 'PERIPHERAL', 'POWER', 'NETWORK', 'OTHER']
+
+/** What's left of this session's pause budget, in ms. */
+function pauseBudgetLeft(db: Db, s: DbSession, now: number): number {
+  const spent = s.pausedTotalMs + (s.pausedAt === null ? 0 : now - s.pausedAt)
+  return Math.max(0, db.settings.maxPauseMinutes * MIN - spent)
+}
+
+/**
+ * Resume: every paused millisecond comes back as playable time, and not one more.
+ * `at` lets the scheduled sweep resume exactly on the budget boundary.
+ */
+function resumeSession(s: DbSession, at: number): number {
+  const pausedMs = Math.max(0, at - (s.pausedAt ?? at))
+  s.plannedEndAt += pausedMs
+  s.pausedTotalMs += pausedMs
+  s.pausedAt = null
+  s.pauseReason = null
+  // The clock moved, so the overdue alert is allowed to fire again later.
+  s.overdueNotifiedAt = null
+  return pausedMs
 }
 
 function shiftSummary(db: Db, user: DbStaff, now: number) {
@@ -777,6 +814,9 @@ defineRoutes([
         endReason: null,
         endNote: null,
         extensionMinutesTotal: 0,
+        pausedAt: null,
+        pausedTotalMs: 0,
+        pauseReason: null,
         overdueNotifiedAt: null,
         warnedAt: null,
         startedByUserId: user.id,
@@ -834,6 +874,83 @@ defineRoutes([
       }
       ctx.audit('SESSION_EXTENDED', 'play_session', s.id, device.code, null, { minutes, collectAtDesk: !body.collectPayment })
       ctx.emit('session.extended', { sessionId: s.id, plannedEndAt: iso(s.plannedEndAt), minutesAdded: minutes })
+      ctx.emit('queue.updated', queueEvent(db))
+      return sessionSummary(db, s, user.role)
+    },
+  },
+  {
+    method: 'POST',
+    path: '/sessions/:id/pause',
+    roles: V,
+    idempotent: true,
+    handler: (ctx) => {
+      const { db, now, body, params, user } = ctx
+      const s = must(byId(db.sessions, Number(params.id)), 'Session')
+      const device = byId(db.devices, s.deviceId)!
+      if (s.endedAt !== null) fail(409, 'SESSION_ALREADY_ENDED', 'That session has already ended.')
+      if (s.pausedAt !== null) fail(409, 'INVALID_TRANSITION', `${device.code} is already paused.`)
+      if (db.settings.maxPauseMinutes <= 0) fail(422, 'BUSINESS_RULE_VIOLATED', 'Pausing is switched off for this event.')
+      // Pause protects time still owed to the player; it is not a source of free minutes.
+      if (s.plannedEndAt <= now) fail(422, 'BUSINESS_RULE_VIOLATED', `${device.code} is already out of time — end it or add 15 minutes instead.`)
+      const left = pauseBudgetLeft(db, s, now)
+      if (left <= 0) fail(422, 'BUSINESS_RULE_VIOLATED', `${device.code} has used its ${db.settings.maxPauseMinutes} minutes of pause. End it as a tech issue if the fault continues.`)
+      const reason = body.reason as PauseReason
+      if (!PAUSE_REASONS.includes(reason)) fail(400, 'VALIDATION_FAILED', 'Pick what went wrong.', { reason: 'Required.' })
+      const note = optStr(body.note)
+      if (reason === 'OTHER' && !note) fail(400, 'VALIDATION_FAILED', 'Say what happened.', { note: 'Required.' })
+      s.pausedAt = now
+      s.pauseReason = reason
+      ctx.audit('SESSION_PAUSED', 'play_session', s.id, device.code, null, { reason, note, budgetLeftSeconds: Math.round(left / 1000) })
+      ctx.emit('session.paused', { sessionId: s.id, deviceId: device.id, deviceCode: device.code, reason, pausedAt: iso(now) })
+      ctx.emit('queue.updated', queueEvent(db))
+      return sessionSummary(db, s, user.role)
+    },
+  },
+  {
+    method: 'POST',
+    path: '/sessions/:id/resume',
+    roles: V,
+    idempotent: true,
+    handler: (ctx) => {
+      const { db, now, params, user } = ctx
+      const s = must(byId(db.sessions, Number(params.id)), 'Session')
+      const device = byId(db.devices, s.deviceId)!
+      if (s.endedAt !== null) fail(409, 'SESSION_ALREADY_ENDED', 'That session has already ended.')
+      if (s.pausedAt === null) fail(409, 'INVALID_TRANSITION', `${device.code} is already running.`)
+      const pausedMs = resumeSession(s, now)
+      ctx.audit('SESSION_RESUMED', 'play_session', s.id, device.code, null, { pausedSeconds: Math.round(pausedMs / 1000), newEndAt: iso(s.plannedEndAt) })
+      ctx.emit('session.resumed', { sessionId: s.id, deviceId: device.id, deviceCode: device.code, plannedEndAt: iso(s.plannedEndAt), automatic: false })
+      ctx.emit('queue.updated', queueEvent(db))
+      return sessionSummary(db, s, user.role)
+    },
+  },
+  {
+    method: 'POST',
+    path: '/sessions/:id/lost-time',
+    roles: V,
+    idempotent: true,
+    handler: (ctx) => {
+      // For when the glitch was over before anyone reached the tablet. Draws on the same
+      // budget as a pause, so play can't be interrupted and gifted twice.
+      const { db, now, body, params, user } = ctx
+      const s = must(byId(db.sessions, Number(params.id)), 'Session')
+      const device = byId(db.devices, s.deviceId)!
+      if (s.endedAt !== null) fail(409, 'SESSION_ALREADY_ENDED', 'That session has already ended.')
+      if (s.pausedAt !== null) fail(409, 'INVALID_TRANSITION', `${device.code} is paused — resume it instead.`)
+      if (db.settings.maxPauseMinutes <= 0) fail(422, 'BUSINESS_RULE_VIOLATED', 'Pausing is switched off for this event.')
+      const reason = body.reason as PauseReason
+      if (!PAUSE_REASONS.includes(reason)) fail(400, 'VALIDATION_FAILED', 'Pick what went wrong.', { reason: 'Required.' })
+      const minutes = int(body.minutes)
+      if (!(minutes > 0)) fail(400, 'VALIDATION_FAILED', 'Pick how many minutes were lost.')
+      const leftMinutes = Math.floor(pauseBudgetLeft(db, s, now) / MIN)
+      if (minutes > leftMinutes) {
+        fail(422, 'BUSINESS_RULE_VIOLATED', leftMinutes > 0 ? `Only ${leftMinutes} more minute${leftMinutes === 1 ? '' : 's'} can be given back on this session.` : `${device.code} has used its ${db.settings.maxPauseMinutes} minutes of pause.`)
+      }
+      s.plannedEndAt += minutes * MIN
+      s.pausedTotalMs += minutes * MIN
+      s.overdueNotifiedAt = null
+      ctx.audit('SESSION_LOST_TIME', 'play_session', s.id, device.code, null, { minutes, reason, note: optStr(body.note) })
+      ctx.emit('session.resumed', { sessionId: s.id, deviceId: device.id, deviceCode: device.code, plannedEndAt: iso(s.plannedEndAt), automatic: false })
       ctx.emit('queue.updated', queueEvent(db))
       return sessionSummary(db, s, user.role)
     },
@@ -1219,6 +1336,7 @@ defineRoutes([
         eventName: str(body.eventName),
         warningThresholdMinutes: range('warningThresholdMinutes', 1, 30, 'Warning threshold'),
         cleaningAutoClearSeconds: range('cleaningAutoClearSeconds', 0, 900, 'Cleaning delay'),
+        maxPauseMinutes: range('maxPauseMinutes', 0, 30, 'Pause budget'),
         allowExtensions: !!body.allowExtensions,
         maxExtensionMinutes: range('maxExtensionMinutes', 5, 120, 'Extension cap'),
         openingCashFloatPaise: range('openingCashFloatPaise', 0, 10_000_000, 'Opening float'),

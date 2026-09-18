@@ -27,7 +27,7 @@ import { STATE_STYLE } from '@/components/floor/DeviceCard'
 const errorsOf = (err: unknown) => (err instanceof ApiError ? err.fieldErrors : {})
 
 // ── A2 Devices ───────────────────────────────────────────────────────────────
-const STATE_TONE: Record<VisualState, BadgeTone> = { OVERDUE: 'over', ENDING_SOON: 'soon', FREE: 'free', RUNNING: 'run', CLEANING: 'clean', OUT: 'out' }
+const STATE_TONE: Record<VisualState, BadgeTone> = { OVERDUE: 'over', PAUSED: 'pause', ENDING_SOON: 'soon', FREE: 'free', RUNNING: 'run', CLEANING: 'clean', OUT: 'out' }
 
 export function DevicesPage() {
   const now = useServerNow()
@@ -815,6 +815,15 @@ export function SettingsPage() {
             </Field>
             <Field label="Cleaning auto-clear (seconds)" htmlFor="st-clean" error={errors.cleaningAutoClearSeconds} hint="0 skips the cleaning state entirely">
               <Input id="st-clean" type="number" min={0} max={900} value={form.cleaningAutoClearSeconds} onChange={(e) => set('cleaningAutoClearSeconds', Number(e.target.value))} />
+            </Field>
+            <Field
+              label="Pause budget per session (minutes)"
+              htmlFor="st-pause"
+              error={errors.maxPauseMinutes}
+              hint="Time a volunteer can stop the clock for during a fault. The timer restarts by itself at the cap, so a forgotten pause can't hold a station. 0 switches pausing off."
+              className="sm:col-span-2"
+            >
+              <Input id="st-pause" type="number" min={0} max={30} value={form.maxPauseMinutes} onChange={(e) => set('maxPauseMinutes', Number(e.target.value))} />
             </Field>
           </CardContent>
         </Card>

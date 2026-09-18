@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Info, Square, Wrench } from 'lucide-react'
-import type { EndReason, FloorDevice } from '@/types/api'
+import { Hourglass, Info, Pause, Square, Wrench } from 'lucide-react'
+import type { EndReason, FloorDevice, PauseReason } from '@/types/api'
 import { sessionsApi } from '@/api/sessions'
 import { devicesApi } from '@/api/devices'
 import { useApiMutation, usePlans } from '@/hooks/queries'
@@ -11,7 +11,7 @@ import { useUser } from '@/hooks/useAuth'
 import { announce } from '@/hooks/useLive'
 import { formatPaise } from '@/lib/money'
 import { extensionPricePaise } from '@/lib/pricing'
-import { formatClock } from '@/lib/time'
+import { formatClock, formatDuration } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Chip, Field, Input, NativeSelect, Textarea } from '@/components/ui/primitives'
@@ -240,6 +240,143 @@ export function FaultDialog({ device, onClose }: { device: FloorDevice | null; o
       <Field label="What's wrong?" htmlFor="fault-reason">
         <Input id="fault-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Charger dead" />
       </Field>
+    </ResponsiveDialog>
+  )
+}
+
+// ── Interruptions (docs/02) ──────────────────────────────────────────────────
+const PAUSE_REASONS: { value: PauseReason; label: string }[] = [
+  { value: 'GAME_CRASH', label: 'Game crashed' },
+  { value: 'PERIPHERAL', label: 'Controller / peripheral' },
+  { value: 'POWER', label: 'Power cut' },
+  { value: 'NETWORK', label: 'Network down' },
+  { value: 'OTHER', label: 'Other' },
+]
+
+function ReasonChips({ value, onChange }: { value: PauseReason | null; onChange: (r: PauseReason) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="What went wrong">
+      {PAUSE_REASONS.map((r) => (
+        <Chip key={r.value} selected={value === r.value} onClick={() => onChange(r.value)}>
+          {r.label}
+        </Chip>
+      ))}
+    </div>
+  )
+}
+
+/** Stops the clock so a fault doesn't eat paid time. Capped, and audited. */
+export function PauseDialog({ device, budgetLeftMs, onClose }: { device: FloorDevice | null; budgetLeftMs: number; onClose: () => void }) {
+  const canAct = useCanAct()
+  const [reason, setReason] = useState<PauseReason | null>(null)
+  const [note, setNote] = useState('')
+  const [key, rotate] = useIdempotencyKey()
+
+  useEffect(() => {
+    if (device) {
+      setReason(null)
+      setNote('')
+    }
+  }, [device])
+
+  const pause = useApiMutation(() => sessionsApi.pause(device!.session!.id, { reason: reason!, note: note.trim() || undefined }, key), {
+    onSuccess: () => {
+      rotate()
+      toast.success(`${device!.code} paused`, { description: 'Their remaining time is safe. Resume as soon as play restarts.' })
+      announce(`${device!.code} paused`)
+      onClose()
+    },
+  })
+
+  const needsNote = reason === 'OTHER'
+  const remaining = device?.session ? +new Date(device.session.plannedEndAt) - Date.now() : 0
+
+  return (
+    <ResponsiveDialog
+      open={device !== null}
+      onOpenChange={(o) => !o && onClose()}
+      title={`Pause ${device?.code ?? ''}`}
+      description={device?.session?.players.map((p) => p.displayName).join(' & ')}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!canAct || !reason || (needsNote && note.trim().length < 3)} loading={pause.isPending} onClick={() => pause.mutate(undefined)}>
+            <Pause /> Pause the clock
+          </Button>
+        </>
+      }
+    >
+      <ReasonChips value={reason} onChange={setReason} />
+      {needsNote && (
+        <Field label="What happened?" htmlFor="pause-note">
+          <Textarea id="pause-note" value={note} onChange={(e) => setNote(e.target.value)} autoFocus placeholder="Required" />
+        </Field>
+      )}
+      <p className="flex gap-2 rounded-lg bg-pause-bg p-3 text-sm">
+        <Info className="mt-0.5 size-4 shrink-0 text-pause" aria-hidden />
+        <span>
+          Their <strong className="tabular-nums">{formatDuration(Math.max(0, remaining))}</strong> is held while the clock is stopped. The station stays
+          theirs, so the queue waits — the timer restarts by itself after{' '}
+          <strong className="tabular-nums">{formatDuration(budgetLeftMs)}</strong>. For a longer fault, report the device instead.
+        </span>
+      </p>
+    </ResponsiveDialog>
+  )
+}
+
+/** The glitch was over before anyone reached the tablet: hand the minutes back. */
+export function LostTimeDialog({ device, budgetLeftMs, onClose }: { device: FloorDevice | null; budgetLeftMs: number; onClose: () => void }) {
+  const canAct = useCanAct()
+  const maxMinutes = Math.floor(budgetLeftMs / 60_000)
+  const [minutes, setMinutes] = useState(1)
+  const [reason, setReason] = useState<PauseReason | null>(null)
+  const [key, rotate] = useIdempotencyKey()
+
+  useEffect(() => {
+    if (device) {
+      setMinutes(Math.min(2, maxMinutes) || 1)
+      setReason(null)
+    }
+  }, [device, maxMinutes])
+
+  const give = useApiMutation(() => sessionsApi.lostTime(device!.session!.id, { minutes, reason: reason! }, key), {
+    onSuccess: () => {
+      rotate()
+      toast.success(`${minutes} min added back on ${device!.code}`)
+      onClose()
+    },
+  })
+
+  return (
+    <ResponsiveDialog
+      open={device !== null}
+      onOpenChange={(o) => !o && onClose()}
+      title={`Add lost time on ${device?.code ?? ''}`}
+      description="For a glitch that was over before you could pause. It comes out of the same pause budget."
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!canAct || !reason || minutes > maxMinutes} loading={give.isPending} onClick={() => give.mutate(undefined)}>
+            <Hourglass /> Add {minutes} min
+          </Button>
+        </>
+      }
+    >
+      <div className="flex gap-2" role="group" aria-label="Minutes lost">
+        {[1, 2, 3, 5].map((m) => (
+          <Chip key={m} selected={minutes === m} disabled={m > maxMinutes} onClick={() => setMinutes(m)} className="flex-1">
+            +{m}
+          </Chip>
+        ))}
+      </div>
+      <ReasonChips value={reason} onChange={setReason} />
+      <p className="text-xs text-muted-foreground">
+        <span className="tabular-nums">{formatDuration(budgetLeftMs)}</span> of this session's pause budget is left.
+      </p>
     </ResponsiveDialog>
   )
 }

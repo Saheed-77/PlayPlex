@@ -10,6 +10,8 @@ export type PaymentMethod = 'CASH' | 'UPI' | 'WAIVED'
 export type PaymentKind = 'INITIAL' | 'EXTENSION' | 'REFUND'
 export type EndReason = 'COMPLETED' | 'ENDED_EARLY' | 'TECH_ISSUE' | 'ADMIN_OVERRIDE'
 export type SkipReason = 'NOT_PRESENT' | 'WANTS_DIFFERENT_DEVICE' | 'OTHER'
+/** Why play stopped. Technical faults only — a pause costs everyone in the queue. */
+export type PauseReason = 'GAME_CRASH' | 'PERIPHERAL' | 'POWER' | 'NETWORK' | 'OTHER'
 
 export interface StaffUser {
   id: number
@@ -31,6 +33,8 @@ export interface EventSettings {
   eventName: string
   warningThresholdMinutes: number
   cleaningAutoClearSeconds: number
+  /** Pause budget per session; 0 switches pausing off entirely. */
+  maxPauseMinutes: number
   allowExtensions: boolean
   maxExtensionMinutes: number
   openingCashFloatPaise: number
@@ -77,6 +81,10 @@ export interface FloorSession {
   startedAt: string
   plannedEndAt: string
   extensionMinutesTotal: number
+  /** Set while play is stopped; the countdown freezes and plannedEndAt moves on resume. */
+  pausedAt: string | null
+  pausedSecondsTotal: number
+  pauseReason: PauseReason | null
   startedByName: string
   players: SessionPlayer[]
 }
@@ -257,6 +265,8 @@ export interface SessionSummary {
   endedAt: string | null
   endReason: EndReason | null
   extensionMinutesTotal: number
+  pausedAt: string | null
+  pausedSecondsTotal: number
   playerNames: string[]
   ticketNos: string[]
   startedByName: string
@@ -320,6 +330,9 @@ export interface ReportSummary {
   medianWaitMinutes: number
   avgSessionMinutes: number
   overdueSessions: number
+  /** Time held by paused sessions, and how many sessions were interrupted. */
+  pausedMinutes: number
+  pausedSessions: number
   peakHour: string | null
   registrationsLastHour: number
   byDeviceType: { code: string; name: string; sessions: number; revenuePaise: number; utilizationPct: number }[]
@@ -333,7 +346,7 @@ export interface RevenueReport {
 }
 
 export interface UtilizationReport {
-  byDevice: { code: string; typeCode: string; sessions: number; minutesInUse: number; minutesAvailable: number; utilizationPct: number; downMinutes: number }[]
+  byDevice: { code: string; typeCode: string; sessions: number; minutesInUse: number; minutesAvailable: number; utilizationPct: number; downMinutes: number; pausedMinutes: number }[]
   byType: { code: string; name: string; sessions: number; utilizationPct: number }[]
 }
 
@@ -352,6 +365,8 @@ export type LiveEventType =
   | 'device.updated'
   | 'session.started'
   | 'session.extended'
+  | 'session.paused'
+  | 'session.resumed'
   | 'session.overdue'
   | 'session.ended'
   | 'queue.updated'

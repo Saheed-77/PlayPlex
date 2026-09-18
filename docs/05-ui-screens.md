@@ -14,7 +14,7 @@ their phones. Design for that, not for a portfolio screenshot.
 | P1 | **Glanceable over dense** | Status is readable from two metres. Big numbers, big colour blocks |
 | P2 | **Colour + shape, never colour alone** | ~8% of men have some colour vision deficiency. Every state also carries an icon and a text label |
 | P3 | **Thumb-sized targets** | Minimum 44×44px. Volunteers use phones one-handed |
-| P4 | **Three actions maximum** | The floor board offers Assign, End, Extend. Everything else is behind an overflow menu |
+| P4 | **Three actions maximum** | The floor board offers Assign, End, Extend — plus Pause on a running card, because hunting through a menu mid-fault is where volunteers fumble. Everything else is behind an overflow menu |
 | P5 | **Destructive actions confirm** | End and Cancel need a second tap. Force-end needs a typed reason |
 | P6 | **Never block on the network** | Optimistic UI with rollback on failure, plus a visible connection indicator |
 | P7 | **Dark mode by default** | It's a gaming room with the lights down. Light theme available |
@@ -27,6 +27,7 @@ their phones. Design for that, not for a portfolio screenshot.
 | In use — running | Slate/Blue | ▶ play | `12:34` counting down |
 | Ending soon (< 5 min) | Amber, gentle pulse | ⏱ timer | `04:12` |
 | Overdue | Red, strong | ⚠ alert | `+03:20` counting **up** |
+| Paused (fault) | Violet | ⏸ pause | `12:34` held · `paused 01:20 of 05:00` |
 | Cleaning | Sky | ✦ sparkle | `CLEANING 0:45` |
 | Out of service | Zinc, 60% opacity | ⛔ ban | `OUT OF SERVICE` + reason |
 
@@ -196,10 +197,12 @@ one screen is the difference between reconciling at close and arguing at close.
 
 **Layout rules**
 
-- **Ordering is by urgency, not by device code.** Overdue first, then ending-soon, then
-  free, then running, then cleaning, then out-of-service. A volunteer scanning
+- **Ordering is by urgency, not by device code.** Overdue first, then paused (a held station
+  is idle while people wait), then ending-soon, then free, then running, then cleaning, then
+  out-of-service. A volunteer scanning
   top-left-to-bottom-right always hits what needs attention first.
-- The **alert rail** across the top holds every overdue session with inline End/+15.
+- The **alert rail** across the top holds every overdue session with inline End/+15, and every
+  paused one with inline Resume and the time left before it restarts by itself.
   Hidden entirely when there's nothing wrong — no permanent empty box.
 - Device-type tabs filter the grid. Sticky, so a laptop-zone volunteer stays filtered.
 - Countdown text is **tabular-nums** so digits don't jitter as they change.
@@ -249,7 +252,7 @@ Opens as a bottom sheet on mobile, a dialog on desktop.
 - On `409 DEVICE_NOT_AVAILABLE`: sheet closes, toast reads *"LAP-05 was just taken by
   Arun — try LAP-09"*, and the board refreshes. Never a raw error dialog.
 
-### V3 — End & Extend
+### V3 — End, Extend & Pause
 
 **End** — confirm dialog with the reason preselected as `COMPLETED`. Other reasons in a
 select; `TECH_ISSUE` and `ADMIN_OVERRIDE` require a note before the button enables.
@@ -272,9 +275,30 @@ select; `TECH_ISSUE` and `ADMIN_OVERRIDE` require a note before the button enabl
 **Extend first, collect later — never interrupt play to chase cash.** The Dues tab is
 what makes that safe.
 
+**Pause** — one tap opens a reason chip row (`Game crashed` · `Controller / peripheral` ·
+`Power cut` · `Network down` · `Other` + note). The card turns violet, the countdown freezes at
+the time still owed, and the pause counts up against a 5-minute budget:
+
+```
+┌───────────────────────────────────────────────┐
+│  ⏸ PC-01                                      │
+│                                               │
+│            12:34                              │
+│            PAUSED                             │
+│   held · paused 01:20 of 05:00                │
+│                                               │
+│  Kabir · Marathon                             │
+│  [    RESUME    ]            [ End ]          │
+└───────────────────────────────────────────────┘
+```
+
+**Resume is a single tap, with no dialog** — the queue is waiting on it. At the budget the timer
+restarts by itself and says so. **Add lost time** in the overflow menu covers the glitch that was
+over before anyone reached the tablet, and spends the same budget.
+
 ### V4 — My Shift
 Sessions this volunteer started, count for the shift, and the **End shift** handover
-summary from [02-workflows.md §8](02-workflows.md#8-workflow-shift-handover). Light
+summary from [02-workflows.md §9](02-workflows.md#9-workflow-shift-handover). Light
 gamification (a session count) is genuinely motivating for student volunteers.
 
 ---
