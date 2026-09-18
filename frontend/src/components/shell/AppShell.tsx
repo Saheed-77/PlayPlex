@@ -8,6 +8,7 @@ import { API_MODE, serverClock } from '@/api/client'
 import { useAuth, useUser } from '@/hooks/useAuth'
 import { qk, useFloor } from '@/hooks/queries'
 import { useMediaQuery, useStoredState } from '@/hooks/useUtils'
+import { demoPanelEnabled } from '@/lib/demoFlag'
 import { ROLE_LABEL } from '@/lib/roles'
 import { formatClock } from '@/lib/time'
 import { cn } from '@/lib/utils'
@@ -21,6 +22,8 @@ import { HandoverSummaryView } from '@/pages/volunteer/HandoverSummary'
 
 // Mock-only: loaded lazily so a real-backend build never ships the demo server.
 const DevPanel = lazy(() => import('./DevPanel'))
+// Read once per page load, so a hosted demo shows the controls only with ?demo=1.
+const showDemoPanel = API_MODE === 'mock' && demoPanelEnabled()
 
 export function useTheme(): ['dark' | 'light', () => void] {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'))
@@ -192,7 +195,7 @@ export function AppShell() {
         <HandoverSummaryView summary={endShift.data} loading={endShift.isPending} />
       </ResponsiveDialog>
 
-      {API_MODE === 'mock' && (
+      {showDemoPanel && (
         <Suspense fallback={null}>
           <DevPanel />
         </Suspense>

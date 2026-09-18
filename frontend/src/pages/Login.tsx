@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router'
 import { LogIn } from 'lucide-react'
 import { API_MODE } from '@/api/client'
+import { demoPanelEnabled } from '@/lib/demoFlag'
 import { friendlyMessage } from '@/api/errors'
 import { useAuth } from '@/hooks/useAuth'
 import { homePath } from '@/lib/roles'
@@ -92,6 +93,11 @@ export function LoginPage() {
                 </button>
               ))}
             </div>
+            {!demoPanelEnabled() && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Running the demo? Open <code className="rounded bg-muted px-1 py-0.5">?demo=1</code> for the controls: role switch, simulated traffic, clock speed and network states.
+              </p>
+            )}
           </div>
         )}
       </div>

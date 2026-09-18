@@ -14,8 +14,7 @@ npm run build      # typecheck + production build
 
 ## Demo accounts (mock mode)
 
-All passwords are `demo1234`. The login page lists them; the **Demo** button (bottom-left)
-switches user without signing out.
+All passwords are `demo1234`. The login page lists them.
 
 | Username | Role | Lands on |
 |---|---|---|
@@ -28,7 +27,12 @@ The seed is a mid-event snapshot: about five hours of history, an overdue laptop
 ending soon, a cleaning station, `LAP-07` out of service, 12 people waiting, and dues on the
 Dues tab.
 
-## Demo controls
+## Demo controls — `?demo=1`
+
+The controls are hidden by default, so a hosted demo doesn't hand every visitor a reset
+button. Open the site with **`?demo=1`** (e.g. `http://localhost:5173/?demo=1`) and the
+**Demo** button appears in the bottom-left corner. The choice is remembered for that browser
+tab, so it survives moving between screens; `?demo=0` turns it off again.
 
 | Control | What it shows |
 |---|---|
@@ -36,6 +40,7 @@ Dues tab.
 | Clock speed 1×/10×/60× · Jump | Watch cards go amber → red and the alert rail appear |
 | Network: Drop SSE / Polling / Offline | The connection indicator, banner, disabled actions and 5-second polling fallback |
 | Reset demo data | Re-seeds everything |
+| Sign in as | Switches role without signing out |
 
 Open a second tab and sign in as a different role: the tabs share state and live events
 through `localStorage` + `BroadcastChannel`, like two staff devices. Assigning the same

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { demoPanelEnabled } from './demoFlag'
 import { deriveState, sortByUrgency } from './deviceState'
 import { formatPaise, parseRupees } from './money'
 import { formatDuration } from './time'
@@ -83,5 +84,27 @@ describe('extensionPricePaise', () => {
     expect(extensionPricePaise(plans, 4, 15)).toBe(3000)
     expect(extensionPricePaise(plans, 3, 15)).toBe(5000)
     expect(extensionPricePaise(plans, 4, 30)).toBe(5000)
+  })
+})
+
+describe('demoPanelEnabled', () => {
+  beforeEach(() => sessionStorage.clear())
+
+  it('is off unless the query asks for it', () => {
+    expect(demoPanelEnabled('')).toBe(false)
+    expect(demoPanelEnabled('?demo=1')).toBe(true)
+    expect(demoPanelEnabled('?foo=bar&demo=yes')).toBe(true)
+  })
+
+  it('sticks for the tab once enabled, so in-app navigation keeps it', () => {
+    demoPanelEnabled('?demo=1')
+    expect(demoPanelEnabled('')).toBe(true)
+    expect(demoPanelEnabled('?other=1')).toBe(true)
+  })
+
+  it('can be switched back off', () => {
+    demoPanelEnabled('?demo=1')
+    expect(demoPanelEnabled('?demo=0')).toBe(false)
+    expect(demoPanelEnabled('')).toBe(false)
   })
 })
