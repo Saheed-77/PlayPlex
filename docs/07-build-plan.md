@@ -269,6 +269,24 @@ below is polish.
 | Multi-event support (`event_id` on every table) | Reuse next year without a rebuild |
 | PWA + offline queue with sync | Real offline tolerance, meaningfully more work |
 
+### Deferred infrastructure — each waits for a trigger
+
+Ideas that are *right at a bigger scale and wrong at this one*. Each has a condition that
+would make it worth doing; until that condition is true, adding it costs event-day
+reliability and buys nothing. Revisit after the event.
+
+| Idea | Only worth it once… | Cheaper first step |
+|---|---|---|
+| **Redis** as a cache / idempotency store / SSE fan-out | there is **more than one API instance**, or a public read-heavy screen (TV display, student app) multiplies the `GET /floor` load | Caffeine in-process cache, and keep idempotency keys in MySQL so they commit in the same transaction as the ticket |
+| **PostgreSQL** instead of MySQL | the four workarounds in [ADR-007](06-architecture.md#adr-007--mysql-over-postgresql) start costing real time, or reporting SQL gets heavier | Nothing to do — the exit is about a day, and the Java barely changes |
+| **A message broker** (Rabbit, Kafka) for events | work has to survive a process restart or fan out to other systems | `ApplicationEventPublisher` in-process; a DB-backed job table if durability is needed |
+| **Horizontal scaling** behind a load balancer | a single laptop can no longer serve the room — it can, comfortably | Vertical: the event laptop is already oversized for 13 stations |
+
+> Why not now: the whole room is 13 stations, under 10 staff sessions and low thousands of
+> rows ([01-product-spec.md §6](01-product-spec.md#6-constraints-and-assumptions) — *"this is
+> a small system; do not over-engineer for scale"*). Every extra process is one more thing
+> that can be down at 4 pm, and the event laptop has to survive on its own with no internet.
+
 ---
 
 ## Definition of Done (every task)
