@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: playplex
+  datasource:
+    # The three UTC settings matter more than anything else in this file: get them wrong
+    # and every countdown in the app is 5.5 hours out (docs/03 §3.3).
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/playplex?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=utf8&rewriteBatchedStatements=true}
+    username: ${SPRING_DATASOURCE_USERNAME:playplex}
+    password: ${SPRING_DATASOURCE_PASSWORD:playplex}
+    hikari:
+      # A small room: a handful of staff devices, never hundreds of connections.
+      maximum-pool-size: 10
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate must never touch it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+  jackson:
+    # Jackson 3 (Spring Boot 4) writes ISO-8601 by default and dropped the old
+    # write-dates-as-timestamps flag entirely — see the version traps in docs/06 §5.
+    default-property-inclusion: always
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    env:
+      enabled: true
+
+playplex:
+  jwt:
+    # Dev default only. The event deployment injects JWT_SECRET (docs/06 §9.1).
+    secret: ${JWT_SECRET:dev-only-secret-change-me-at-least-32-bytes-long}
+    # Long enough that nobody re-logs-in mid-shift, short enough that a lost tablet
+    # isn't a permanent hole (docs/04 §1).
+    ttl-hours: 12
+    cookie-name: ppx_session
+    secure-cookie: ${JWT_SECURE_COOKIE:false}
+  cors:
+    # The Vite dev server. In production the UI is served same-origin, so this is empty.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+logging:
+  level:
+    local.playplex: INFO
