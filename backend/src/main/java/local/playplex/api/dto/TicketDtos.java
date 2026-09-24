@@ -54,4 +54,23 @@ public class TicketDtos {
                              Short yearOfStudy, int visitCount, String activeTicketNo) { }
 
     public record PageDto<T>(List<T> content, int page, int size, long totalElements, int totalPages) { }
+
+    public record SessionRef(Long id, String deviceCode, Instant startedAt, Instant plannedEndAt,
+                             Instant endedAt, String endReason, int extensionMinutesTotal) { }
+
+    /** Row click opens this: the full payment ledger, which is what settles arguments. */
+    public record TicketDetailDto(TicketDto ticket, List<PaymentDto> payments, List<SessionRef> sessions) { }
+
+    public record UpdateTicketRequest(Long preferredDeviceTypeId, String notes) { }
+
+    public record CancelRequest(@NotBlank(message = "Give a reason for cancelling.") String reason,
+                                boolean refund, PaymentMethod method) { }
+
+    /** Settle a PAYMENT_DUE, or pay back a REFUND_DUE. */
+    public record SettleRequest(@NotNull PaymentKind kind, @NotNull PaymentMethod method,
+                                int amountPaise, String referenceNo, String note) { }
+
+    public record PriorityRequest(short priority,
+                                  @NotBlank(message = "A reason is required. Priority bumps are audited.")
+                                  String reason) { }
 }

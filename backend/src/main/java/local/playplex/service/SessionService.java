@@ -5,6 +5,8 @@ import local.playplex.api.dto.SessionDtos.StartSessionRequest;
 import local.playplex.domain.*;
 import local.playplex.error.ApiException;
 import local.playplex.error.ErrorCode;
+import local.playplex.live.LiveEvent;
+import local.playplex.live.LiveEventPublisher;
 import local.playplex.repo.*;
 import local.playplex.security.CurrentUser;
 import org.springframework.stereotype.Service;
@@ -29,13 +31,15 @@ public class SessionService {
     private final StaffUserRepository users;
     private final SettingsService settingsService;
     private final AuditService audit;
+    private final QueueEventFactory queueEvents;
+    private final LiveEventPublisher live;
     private final Clock clock;
 
     public SessionService(DeviceRepository devices, TicketRepository tickets, PlaySessionRepository sessions,
                           PlaySessionPlayerRepository players, PlaySessionEventRepository sessionEvents,
                           DeviceStatusLogRepository statusLog, PaymentRepository payments,
                           StaffUserRepository users, SettingsService settingsService, AuditService audit,
-                          Clock clock) {
+                          QueueEventFactory queueEvents, LiveEventPublisher live, Clock clock) {
         this.devices = devices;
         this.tickets = tickets;
         this.sessions = sessions;
@@ -46,6 +50,8 @@ public class SessionService {
         this.users = users;
         this.settingsService = settingsService;
         this.audit = audit;
+        this.queueEvents = queueEvents;
+        this.live = live;
         this.clock = clock;
     }
 
@@ -147,7 +153,17 @@ public class SessionService {
 
         changeStatus(device, DeviceStatus.IN_USE, null, actor.id(), now);
         logEvent(session, SessionEventType.STARTED, actor.id(), now);
-        return summarise(session, actor);
+
+        SessionSummaryDto summary = summarise(session, actor);
+        Map<String, Object> started = new HashMap<>();
+        started.put("sessionId", session.getId());
+        started.put("deviceId", device.getId());
+        started.put("plannedEndAt", session.getPlannedEndAt());
+        started.put("players", summary.ticketNos());
+        live.publish(LiveEvent.Type.SESSION_STARTED, started);
+        live.deviceUpdated(device.getId(), device.getCode(), DeviceStatus.IN_USE, null);
+        live.publish(LiveEvent.Type.QUEUE_UPDATED, queueEvents.payload());
+        return summary;
     }
 
     @Transactional
@@ -200,7 +216,20 @@ public class SessionService {
             DeviceStatus next = settings.getCleaningAutoClearSeconds() == 0
                     ? DeviceStatus.AVAILABLE : DeviceStatus.CLEANING;
             changeStatus(session.getDevice(), next, null, actor.id(), now);
+            Device device = session.getDevice();
+            live.publish(LiveEvent.Type.SESSION_ENDED, Map.of("sessionId", session.getId(),
+                    "deviceId", device.getId(), "endReason", reason.name()));
+            live.deviceUpdated(device.getId(), device.getCode(), next, null);
         }
+        if (reason == EndReason.TECH_ISSUE) {
+            for (PlaySessionPlayer player : players.findBySession(session.getId())) {
+                Ticket t = player.getTicket();
+                if (t.getPaymentStatus() == PaymentStatus.REFUND_DUE) {
+                    live.ticketFlagged(t.getId(), t.getTicketNo(), PaymentStatus.REFUND_DUE.name());
+                }
+            }
+        }
+        live.publish(LiveEvent.Type.QUEUE_UPDATED, queueEvents.payload());
         logEvent(session, SessionEventType.ENDED, actor.id(), now);
         return summarise(session, actor);
     }

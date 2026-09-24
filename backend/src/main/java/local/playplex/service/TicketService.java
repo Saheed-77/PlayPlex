@@ -4,6 +4,8 @@ import local.playplex.api.dto.TicketDtos.*;
 import local.playplex.domain.*;
 import local.playplex.error.ApiException;
 import local.playplex.error.ErrorCode;
+import local.playplex.live.LiveEvent;
+import local.playplex.live.LiveEventPublisher;
 import local.playplex.repo.*;
 import local.playplex.security.CurrentUser;
 import org.springframework.stereotype.Service;
@@ -29,13 +31,16 @@ public class TicketService {
     private final StaffUserRepository users;
     private final SeqCounterRepository seq;
     private final SettingsService settingsService;
+    private final QueueEventFactory queueEvents;
+    private final LiveEventPublisher live;
     private final Clock clock;
 
     public TicketService(TicketRepository tickets, StudentRepository students, PlanRepository plans,
                          DeviceTypeRepository deviceTypes, PaymentRepository payments,
                          PlaySessionPlayerRepository playerRepo, DeviceRepository devices,
                          StaffUserRepository users, SeqCounterRepository seq,
-                         SettingsService settingsService, Clock clock) {
+                         SettingsService settingsService, QueueEventFactory queueEvents,
+                         LiveEventPublisher live, Clock clock) {
         this.tickets = tickets;
         this.students = students;
         this.plans = plans;
@@ -46,6 +51,8 @@ public class TicketService {
         this.users = users;
         this.seq = seq;
         this.settingsService = settingsService;
+        this.queueEvents = queueEvents;
+        this.live = live;
         this.clock = clock;
     }
 
@@ -123,6 +130,8 @@ public class TicketService {
         payment.setNote(blankToNull(request.payment().note()));
         payments.save(payment);
 
+        // Everyone's wait estimate just changed.
+        live.publish(LiveEvent.Type.QUEUE_UPDATED, queueEvents.payload());
         return toDto(ticket, now, true);
     }
 
