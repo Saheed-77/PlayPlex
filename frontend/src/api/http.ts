@@ -42,10 +42,11 @@ export const httpTransport: Transport = {
     return { data: payload, serverTime }
   },
 
-  openStream({ onOpen, onError, onEvent }) {
+  openStream({ onOpen, onError, onEvent, onHeartbeat }) {
     const source = new EventSource('/api/stream', { withCredentials: true })
     source.onopen = onOpen
     source.onerror = onError
+    source.addEventListener('heartbeat', () => onHeartbeat?.())
     for (const type of EVENT_TYPES) {
       source.addEventListener(type, (e) => {
         try {

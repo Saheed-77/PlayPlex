@@ -70,17 +70,22 @@ src/
 
 ## Where the frontend adds to the API spec
 
-The mock implements these so the UI can be complete. The backend should add them, or the
-docs should be updated:
+These started as additions the mock made so the UI could be complete. **They are all in the
+Spring Boot backend now** (Phases B–E), and `docs/` has been updated to match:
 
 - `GET /floor` also returns `settings` (warning threshold, extension rules) and `duesCount`,
   so every role gets them without an admin-only call.
 - `POST /tickets/{id}/no-show`, `POST /sessions/end-all`, `GET /sessions/mine`,
   `GET|POST /shift/summary|end`, `GET /admin/devices/suggest-code`, `POST /admin/plans/reorder`.
-- `payment_status` includes `REFUND_DUE` (the UI spec and SSE events use it; the data-model
-  enum doesn't list it).
+- `payment_status` includes `REFUND_DUE`.
 - `plan.seats_per_ticket` (Console Duo = 2 players on one ticket).
 - A tech-issue end puts the ticket back to `QUEUED` with priority 1 **and** `REFUND_DUE`;
   starting the reissued turn clears the refund flag, refunding cancels the turn.
 - `extend {collectPayment}`: `false` flags `PAYMENT_DUE` (as specced). The UI's
   "Already paid" option sends `true`.
+
+One thing went the other way. The stream's keep-alive used to be a `:heartbeat` comment,
+which `EventSource` never surfaces to JavaScript — so a socket wedged open by a dead proxy
+looked exactly like a healthy one and the board kept showing a frozen floor under a green
+"Live" light. It is now a named `heartbeat` event, and the client runs a watchdog that
+reconnects after two missed beats.

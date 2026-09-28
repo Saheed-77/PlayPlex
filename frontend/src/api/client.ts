@@ -14,6 +14,12 @@ export interface StreamHandlers {
   onOpen: () => void
   onError: () => void
   onEvent: (event: LiveEvent) => void
+  /**
+   * The server's 20-second beat. It exists so silence is detectable: a socket wedged
+   * open by a proxy never fires `error`, and without a beat the board would go on
+   * claiming it is live while showing a frozen floor.
+   */
+  onHeartbeat?: () => void
   /** Clears the failure count (used by the mock's simulated network). */
   onReset?: () => void
 }

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Floor, LiveEvent } from '@/types/api'
-import { openStream } from '@/api/client'
+import { API_MODE, openStream } from '@/api/client'
 import { floorApi } from '@/api/floor'
 import { useAuth } from './useAuth'
 import { connection, useConnection } from './useConnection'
@@ -115,21 +115,34 @@ const KEYS_FOR: Record<LiveEvent['type'], string[]> = {
   'settings.updated': ['floor', 'plans', 'admin'],
 }
 
+/**
+ * Two missed beats. The server speaks every 20 seconds, so 45 is silence that means
+ * something rather than a slow network.
+ */
+const STALE_MS = 45_000
+
 export function LiveProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient()
   const { user } = useAuth()
   const state = useConnection()
   const failures = useRef(0)
   const hasBeenLive = useRef(false)
+  // Bumping this tears the stream down and opens a fresh one.
+  const [attempt, setAttempt] = useState(0)
+  const lastSignalAt = useRef(Date.now())
+  const heard = useCallback(() => {
+    lastSignalAt.current = Date.now()
+  }, [])
 
   useEffect(() => {
     if (!user) return
     const invalidate = makeInvalidator(qc)
     connection.set('connecting')
-    failures.current = 0
+    heard()
     const close = openStream({
       onOpen: () => {
         failures.current = 0
+        heard()
         // After a drop, always refetch to resync (docs/04 §11 rule 2).
         if (hasBeenLive.current) qc.invalidateQueries()
         hasBeenLive.current = true
@@ -140,10 +153,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         const next = failures.current >= 3 ? 'polling' : 'reconnecting'
         if (connection.get() !== 'offline' || next === 'reconnecting') connection.set(next)
       },
+      onHeartbeat: heard,
       onReset: () => {
         failures.current = 0
+        heard()
       },
       onEvent: (event) => {
+        heard()
         patchFloor(qc, event)
         invalidate(KEYS_FOR[event.type] ?? ['floor'])
         if (event.type === 'session.overdue') {
@@ -159,7 +175,29 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       close()
       connection.set('connecting')
     }
-  }, [user, qc])
+  }, [user, qc, attempt, heard])
+
+  /**
+   * The watchdog. `EventSource` only fires `error` when the socket actually breaks, and a
+   * connection held open by a dead proxy never does — which is how a board ends up showing
+   * a frozen floor under a green "Live" light. If the server has said nothing at all for
+   * two beats, stop believing the light and reconnect.
+   *
+   * Only in `http` mode: the demo backend has no real socket, and its network controls set
+   * the state directly.
+   */
+  useEffect(() => {
+    if (!user || API_MODE !== 'http') return
+    const id = setInterval(() => {
+      if (connection.get() === 'offline') return
+      if (Date.now() - lastSignalAt.current <= STALE_MS) return
+      failures.current += 1
+      connection.set(failures.current >= 3 ? 'polling' : 'reconnecting')
+      lastSignalAt.current = Date.now()
+      setAttempt((n) => n + 1)
+    }, 5000)
+    return () => clearInterval(id)
+  }, [user])
 
   // Polling fallback: GET /floor every 5s while the stream is down.
   useEffect(() => {

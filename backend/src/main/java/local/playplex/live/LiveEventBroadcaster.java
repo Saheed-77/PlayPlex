@@ -9,6 +9,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -67,11 +68,20 @@ public class LiveEventBroadcaster {
         }
     }
 
-    /** Proxies kill idle connections, so say something harmless every 20 seconds. */
+    /**
+     * Proxies kill idle connections, so say something harmless every 20 seconds.
+     *
+     * This is a *named* event rather than a `:comment` because a comment keeps the socket
+     * warm but is invisible to JavaScript: `EventSource` never surfaces it. Without
+     * something the client can actually observe, a connection wedged open by a proxy looks
+     * identical to a healthy one, and the board goes on claiming it is live while showing
+     * a frozen floor. A named beat lets the client notice the silence and reconnect.
+     */
     public void heartbeat() {
+        long at = System.currentTimeMillis();
         for (SseEmitter emitter : emitters) {
             try {
-                emitter.send(SseEmitter.event().comment("heartbeat"));
+                emitter.send(SseEmitter.event().name("heartbeat").data(Map.of("at", at)));
             } catch (Exception ex) {
                 emitters.remove(emitter);
             }

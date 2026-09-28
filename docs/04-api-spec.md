@@ -446,8 +446,11 @@ numbers.
 
 Spring Boot: return a `SseEmitter` (timeout `0` = no timeout), keep them in a
 `CopyOnWriteArrayList`, and publish from the service layer via
-`ApplicationEventPublisher`. Send a `:heartbeat` comment every 20 seconds so proxies
-don't kill idle connections.
+`ApplicationEventPublisher`. Send a **`heartbeat` event** every 20 seconds so proxies don't
+kill idle connections — a named event rather than a `:comment`, because a comment keeps the
+socket warm but is invisible to JavaScript. Without something the client can observe, a
+connection wedged open by a dead proxy looks identical to a healthy one, and the board goes
+on claiming it is live while showing a frozen floor.
 
 ### Event types
 
@@ -463,6 +466,7 @@ don't kill idle connections.
 | `queue.updated` | `{queueLength, byDeviceType:[{id, length, estimatedWaitMinutes}]}` | Everyone |
 | `ticket.flagged` | `{ticketId, ticketNo, flag}` — `PAYMENT_DUE` \| `REFUND_DUE` | Reception, Admin |
 | `settings.updated` | `{}` — clients refetch settings | Everyone |
+| `heartbeat` | `{at}` — proof of life every 20s; never changes the view | Everyone |
 
 ```
 event: session.started
@@ -476,7 +480,9 @@ data: {"sessionId":91,"deviceId":8,"plannedEndAt":"2026-09-14T09:27:10Z",
    anything ambiguous, refetch `GET /api/floor`. Never try to rebuild full state from a
    stream of deltas — a single missed event and every board is silently wrong.
 2. `EventSource` reconnects on its own. On the `open` event after a drop, **always
-   refetch `/api/floor`** to resync.
+   refetch `/api/floor`** to resync. `EventSource` only fires `error` when the socket
+   actually breaks, so also run a **watchdog**: if nothing at all has arrived for two
+   missed beats (45s), stop believing the green light — drop the stream and open a new one.
 3. While disconnected: show an amber banner and **disable every action button**. A
    stale board is fine to look at; acting on one is not.
 4. **Polling fallback:** if SSE fails three times in a row, fall back to

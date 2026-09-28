@@ -59,9 +59,10 @@ public class TicketController {
         return created;
     }
 
+    /** Full detail including the payment ledger (docs/04 §6) — the desk always wants both. */
     @GetMapping("/tickets/{id}")
-    public TicketDto get(@PathVariable Long id) {
-        return tickets.get(id);
+    public TicketDetailDto get(@PathVariable Long id) {
+        return reception.detail(id);
     }
 
     @GetMapping("/students")
@@ -77,11 +78,6 @@ public class TicketController {
                                    @RequestParam(defaultValue = "0") int page,
                                    @RequestParam(defaultValue = "50") int size) {
         return reception.list(q, status, dues, page, size);
-    }
-
-    @GetMapping("/tickets/{id}/detail")
-    public TicketDetailDto detail(@PathVariable Long id) {
-        return reception.detail(id);
     }
 
     @PatchMapping("/tickets/{id}")
