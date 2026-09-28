@@ -36,4 +36,10 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
     List<Ticket> findByStatusIn(List<TicketStatus> statuses);
 
     long countByStudentIdAndStatusNot(Long studentId, TicketStatus status);
+    @Query("""
+            select t from Ticket t join fetch t.student left join fetch t.preferredDeviceType
+            where t.assignedAt >= :from and t.assignedAt < :to
+            """)
+    List<Ticket> findAssignedBetween(Instant from, Instant to);
+
 }

@@ -23,4 +23,14 @@ public interface PlaySessionPlayerRepository extends JpaRepository<PlaySessionPl
 
     @Query("select p from PlaySessionPlayer p join fetch p.session where p.ticket.id = :ticketId")
     List<PlaySessionPlayer> findByTicket(Long ticketId);
+    /** Every seat ever taken, with the station it was on: the join reports need to attribute money. */
+    @Query("""
+            select p from PlaySessionPlayer p
+              join fetch p.ticket
+              join fetch p.session s
+              join fetch s.device d
+              join fetch d.deviceType
+            """)
+    List<PlaySessionPlayer> findAllWithDevice();
+
 }

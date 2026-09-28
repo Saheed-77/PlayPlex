@@ -27,4 +27,14 @@ public interface PlaySessionRepository extends JpaRepository<PlaySession, Long> 
     List<PlaySession> findPaused();
 
     List<PlaySession> findByStartedByIdAndStartedAtGreaterThanEqualOrderByStartedAtDesc(Long userId, Instant since);
+    /** Anything that overlapped the window, including a session still running now. */
+    @Query("""
+            select s from PlaySession s join fetch s.device d join fetch d.deviceType
+            where s.startedAt < :to and (s.endedAt is null or s.endedAt > :from)
+            """)
+    List<PlaySession> findOverlapping(Instant from, Instant to);
+
+    @Query("select s from PlaySession s join fetch s.device where s.endedAt >= :from and s.endedAt < :to")
+    List<PlaySession> findEndedBetween(Instant from, Instant to);
+
 }

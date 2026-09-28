@@ -626,5 +626,10 @@ WHERE created_at >= :dayStart AND created_at < :dayEnd;
   the tables while reception is registering someone.
 - **After each day:** copy the dump to a second machine or a cloud drive. One copy is
   not a backup.
-- **After the event:** run the anonymisation script — clears `student.phone` and
-  `student.roll_no`, keeps every session and payment row for the report.
+- **After the event:** run the anonymisation script (`scripts/anonymise.sql`) — replaces
+  `student.phone` with a per-row `anon-00000123` placeholder (the column is NOT NULL and
+  uniquely indexed, so it cannot simply be emptied) and clears `roll_no`, `department` and
+  `year_of_study`. Names stay, because a session row with no name at all is unreadable in
+  the audit trail; what goes is everything that could be used to contact someone. Every
+  ticket, session and payment row is untouched, so the reports still add up a year later.
+  The script is safe to run twice and ends with two verification queries.

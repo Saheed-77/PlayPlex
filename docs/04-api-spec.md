@@ -406,6 +406,14 @@ Every price change writes `PLAN_PRICE_CHANGED` to the audit log with before/afte
 | `GET` | `/admin/reports/students?from=&to=&page=` | Every registration, searchable |
 | `GET` | `/admin/reports/export?type=&from=&to=` | **CSV** — `type` ∈ `students`, `tickets`, `sessions`, `payments` |
 
+**The CSV files.** RFC 4180: CRLF rows, and any field holding a comma, a quote or a
+newline is quoted. The body is UTF-8 and starts with a **BOM**, without which Excel reads
+Indian names in its own codepage and mangles them. Every download is written to the audit
+log as `EXPORT_DOWNLOADED` with the type and date range — these files carry phone numbers,
+which is the whole reason the export is a server endpoint and not a button that serialises
+whatever the browser happens to be holding. The `sessions` file also carries
+`paused_seconds`, so held time can be reconciled against the utilisation report.
+
 ```jsonc
 // GET /api/admin/reports/summary?from=2026-09-14&to=2026-09-14
 {
