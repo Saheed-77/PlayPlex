@@ -68,6 +68,35 @@ src/
 └─ pages/        reception/ · volunteer/ · admin/ · login
 ```
 
+## End-to-end tests
+
+```bash
+docker compose up -d          # from the repo root: db + api + web
+npm run e2e
+```
+
+One spec, and it is the one worth having: a turn from the desk to the floor, with reception
+and a volunteer open in two browser contexts at once. Neither screen is reloaded after the
+first load — the desk moves between its tabs by clicking the nav — so every assertion about
+what the *other* person just did is a live update that had to cross SSE to get there. A
+version of this test that reloaded between steps would pass just as happily with the stream
+completely broken.
+
+It makes its own staff the way the event lead does on the morning: admin creates the
+account, the server issues a one-time password, and the test changes it on first sign-in.
+Re-running resets those accounts rather than failing. If the seeded admin password has been
+changed on that stack, pass `E2E_ADMIN_PASSWORD`.
+
+It uses the **installed Chrome** (`channel: 'chrome'`) rather than a downloaded build — the
+browser the staff tablets actually run, and no 150MB download on every machine. To use
+Playwright's own instead: `npx playwright install chromium` and drop the `channel` line.
+
+Against the dev servers instead of the containers:
+
+```bash
+E2E_BASE_URL=http://localhost:5173 npm run e2e
+```
+
 ## Where the frontend adds to the API spec
 
 These started as additions the mock made so the UI could be complete. **They are all in the

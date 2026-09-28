@@ -14,3 +14,7 @@ Thumbs.db
 
 # Event data, never in git.
 backups/*.sql.gz
+
+# Playwright output.
+frontend/test-results/
+frontend/playwright-report/
