@@ -1,6 +1,8 @@
-# The event-day stack (docs/06 §9). Runs identically on the LAN laptop and a cloud VM.
-# `api` and `web` are added in the packaging phase, once their Dockerfiles exist; until
-# then this brings up the database that `./mvnw spring-boot:run` and the tests talk to.
+# The event-day stack (docs/06 §9). Runs identically on the LAN laptop and a cloud VM —
+# the only difference is which `.env` you point it at.
+#
+#   docker compose up -d db                      # just the database, for ./mvnw spring-boot:run
+#   docker compose --env-file .env.event up -d   # the whole stack, on event day
 
 services:
   db:
@@ -27,6 +29,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    environment:
+      # All three UTC settings are in this file: the server's --default-time-zone above,
+      # connectionTimeZone here, and -Duser.timezone in the image (docs/03 §3.3).
+      SPRING_DATASOURCE_URL: >-
+        jdbc:mysql://db:3306/${DB_NAME:-playplex}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=utf8&rewriteBatchedStatements=true
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-playplex}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-playplex}
+      # Override this. The dev default in application.yml signs tokens anyone can forge.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-at-least-32-bytes-long}
+      # The UI is served same-origin through nginx, so no browser origin needs allowing.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      JWT_SECURE_COOKIE: ${JWT_SECURE_COOKIE:-false}
+    expose:
+      - '8080'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - '${WEB_PORT:-80}:80'
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

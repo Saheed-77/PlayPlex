@@ -236,10 +236,18 @@ are what matter, and they'll be correct.
 ### Backup — runs automatically every 30 minutes
 
 ```bash
+./scripts/backup.sh
+```
+
+That wraps the dump below, then **checks the file it just wrote**: a dump that died
+halfway still leaves a plausible-looking `.sql.gz` behind, so the script refuses to keep
+one that is unreadable or missing mysqldump's closing line. It also prunes to the last 48.
+
+```bash
 docker compose exec -T db \
   mysqldump -u "$DB_USER" -p"$DB_PASSWORD" \
             --single-transaction --routines --triggers \
-            --set-gtid-purged=OFF playplex \
+            --set-gtid-purged=OFF --no-tablespaces playplex \
   | gzip > "./backups/playplex-$(date +%Y%m%d-%H%M).sql.gz"
 ```
 
@@ -251,6 +259,16 @@ Windows Task Scheduler or `cron`, every 30 minutes. Keep the last 48.
 One copy is not a backup.**
 
 ### Restore
+
+```bash
+./scripts/restore.sh latest
+```
+
+It names the file and its age, makes you type the database name, stops `api` (a restore
+under a live connection pool hands Hibernate a schema that changes underneath it), drops
+and recreates the schema so the restore *replaces* rather than merges, loads the dump,
+then prints the ticket, session and payment counts plus the next ticket number so you can
+check them against what you remember before carrying on. The raw sequence:
 
 ```bash
 docker compose stop api

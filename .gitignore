@@ -11,3 +11,6 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Event data, never in git.
+backups/*.sql.gz
