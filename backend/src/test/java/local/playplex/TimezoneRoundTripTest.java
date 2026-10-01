@@ -7,6 +7,7 @@ import local.playplex.api.dto.TicketDtos.PaymentInput;
 import local.playplex.api.dto.TicketDtos.StudentInput;
 import local.playplex.api.dto.TicketDtos.TicketDto;
 import local.playplex.domain.Device;
+import local.playplex.domain.SkipReason;
 import local.playplex.domain.PaymentMethod;
 import local.playplex.domain.PlaySession;
 import local.playplex.domain.Role;
@@ -52,8 +53,10 @@ class TimezoneRoundTripTest extends IntegrationTestBase {
                 new PaymentInput(PaymentMethod.CASH, 3000, null, null), null), ADMIN);
 
         Instant before = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        // Other classes in this suite leave people waiting, so seating this brand-new
+        // ticket is a skip — which the server rightly refuses without a reason.
         SessionSummaryDto started = sessions.start(
-                new StartSessionRequest(device.getId(), List.of(ticket.id()), null), ADMIN);
+                new StartSessionRequest(device.getId(), List.of(ticket.id()), SkipReason.OTHER), ADMIN);
 
         // 1. Through JPA: the instant we just wrote is now, not now ± an offset.
         PlaySession reloaded = playSessions.findById(started.id()).orElseThrow();

@@ -200,6 +200,27 @@ cash box. **They must match to the rupee.**
 | 6.9 | Print the paper fallback sheets | In the box, physically, before event day |
 | 6.10 | Write the one-page volunteer cheat sheet | A new volunteer is productive in 5 minutes without help |
 
+**Two of these are automated** — the rest need people and the room.
+
+- **6.3** — `backend/.../FloorUnderLoadTest` seeds 200 tickets and ~56 sessions through the
+  real services and asserts `GET /api/floor` stays inside a 500 ms tripwire (it measures
+  ~22 ms), that the queue is still correctly ordered with 100+ waiting, and that every free
+  station is offered a *different* person. That last one is the bug worth having a test
+  for: hand every station the head of the queue and two volunteers start the same student
+  on two machines, and you would never notice with three people waiting. It puts the room
+  back afterwards — it shares a database with the rest of the suite.
+- **6.5** — `frontend/src/api/client.test.ts` poses as a device with a wrong clock and
+  checks `serverClock` corrects it, survives responses with no `X-Server-Time`, and stands
+  aside for the demo's own clock; `lib.test.ts` then checks a session ending in four
+  minutes still reads `ENDING_SOON` on a tablet ten minutes fast, rather than `OVERDUE`.
+  Uncorrected, one wrong tablet ends every session it touches early, all evening, and the
+  board looks entirely normal while it happens.
+- **6.8** — `scripts/backup.sh` and `scripts/restore.sh`; the restore has been rehearsed.
+
+The browser half of 6.3 is `frontend/e2e/floor-under-load.spec.ts`, off by default
+(`npm run e2e:load`) because it registers 200 people: it paints the board in ~650 ms
+against the one-second budget.
+
 ### Dry-run protocol
 
 1. Seed with an empty DB and the real plans.

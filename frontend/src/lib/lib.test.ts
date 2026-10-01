@@ -48,6 +48,20 @@ describe('deriveState', () => {
     expect(deriveState(paused, NOW + 10 * 60_000, WARN).state).toBe('PAUSED')
   })
 
+  it('reads the same on a tablet ten minutes fast, because the clock is corrected first', () => {
+    const ending = device('A', 'IN_USE', 4 * 60_000)
+
+    // What a wrong device clock would say on its own: four minutes in the past, so the
+    // volunteer sees a red overdue card and ends a session with four minutes left on it.
+    expect(deriveState(ending, NOW + 10 * 60_000, WARN).state).toBe('OVERDUE')
+
+    // What it actually gets, because every countdown reads the skew-corrected value from
+    // `serverClock` through the single ticker in hooks/useServerNow (docs/05 V1).
+    const corrected = deriveState(ending, NOW, WARN)
+    expect(corrected.state).toBe('ENDING_SOON')
+    expect(corrected.remainingMs).toBe(4 * 60_000)
+  })
+
   it('maps the non-session statuses', () => {
     expect(deriveState(device('A', 'AVAILABLE'), NOW, WARN).state).toBe('FREE')
     expect(deriveState(device('A', 'CLEANING'), NOW, WARN).state).toBe('CLEANING')
