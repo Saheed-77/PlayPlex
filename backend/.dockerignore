@@ -1,0 +1,12 @@
+# The Dockerfile copies only .mvn/, mvnw, pom.xml and src/, so none of this could reach
+# the image anyway. It is here so it never reaches the build *context* either: target/
+# holds the last local build's jar, and .git is the whole history, uploaded on every build.
+target
+.git
+.gitignore
+.idea
+*.iml
+.vscode
+Dockerfile
+.dockerignore
+HELP.md

@@ -1,0 +1,22 @@
+# `npm ci` inside the image installs the dependencies for the image's own platform. Copying
+# the host's node_modules in on top of them replaces Linux binaries with whatever the
+# developer's laptop is — which is how a build that works on one machine fails on another
+# for reasons that look like nonsense. 256MB of build context, to break the build.
+node_modules
+
+# Built by the image, not copied into it.
+dist
+
+# Test output, and the browsers Playwright downloads.
+test-results
+playwright-report
+coverage
+
+.git
+.gitignore
+Dockerfile
+.dockerignore
+
+# The local dev override. The image sets VITE_API_MODE itself.
+.env.local
+.env.development.local

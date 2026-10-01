@@ -359,3 +359,77 @@ Fill this in and print it. It's the one part of this document nobody can improvi
 | Venue / facilities | | |
 | College IT (network) | | |
 | Electrical / maintenance | | |
+
+---
+
+## 11. Deploying the stack
+
+Do this the week before, not the morning of. The whole event runs from one
+`docker-compose.yml`: MySQL, the API, and nginx serving the UI. It works the same on Linux
+and on Docker Desktop for Windows. The differences between the two are listed below the
+common steps.
+
+### Common to both
+
+```bash
+git clone <repo> playplex && cd playplex
+cp .env.example .env
+```
+
+Edit `.env` before the first start:
+
+- **`JWT_SECRET`**: generate a real one with `openssl rand -base64 48`. The default is the
+  development secret from `application.yml`, and anyone who has read this repo can forge a
+  sign-in with it.
+- **`DB_PASSWORD`** and **`DB_ROOT_PASSWORD`**: change both. They are baked into the MySQL
+  volume on first start, and changing them later means recreating it.
+- **`WEB_PORT`**: leave it at `80` unless `up` fails to bind it (see below).
+
+```bash
+docker compose up -d
+docker compose ps           # db, api and web all "healthy" after about a minute
+```
+
+Open `http://<laptop-ip>/` from a staff device and sign in as **`admin` / `playplex`**. The
+system requires a new password before anything else works. Then create the real staff
+accounts from the **Staff** screen.
+
+Use `docker compose` (the v2 plugin), not the old `docker-compose`.
+
+### Linux
+
+- **Port 80** needs root. With rootless Docker, or a host that refuses it, set
+  `WEB_PORT=8080` in `.env` and give out `http://<laptop-ip>:8080/` instead.
+- **SELinux (Fedora, RHEL, Rocky, Alma)** blocks the `./backups` bind mount unless it is
+  relabelled, and the failure is quiet: the backups simply never appear. Run this once, then
+  take a test backup and check the file exists:
+  ```bash
+  sudo chcon -Rt svirt_sandbox_file_t ./backups
+  ```
+- Make sure `docker` starts at boot (`sudo systemctl enable docker`). With that and
+  `restart: unless-stopped`, a reboot mid-event brings the whole stack back with nobody
+  signed in.
+- Schedule the backup with cron, every 30 minutes (§7):
+  ```bash
+  */30 * * * * cd /path/to/playplex && ./scripts/backup.sh >> backups/backup.log 2>&1
+  ```
+
+### Windows (Docker Desktop)
+
+- **Docker Desktop has to start by itself.** On Windows the Docker engine is a desktop app,
+  not a boot service, so `restart: unless-stopped` only helps once someone is signed in and
+  Docker Desktop has started. Turn on *Settings → General → Start Docker Desktop when you
+  sign in*, and either set the laptop to sign in automatically or make sure the tech owner
+  can type the password within a minute. **This is the biggest difference from Linux. If
+  you skip it, a mid-event reboot brings nothing back, and every board drops to the
+  paper-fallback screen.**
+- **Port 80** is often already taken by IIS or HTTP.sys; it shows up as the `System`
+  process. If `up` reports it cannot bind, set `WEB_PORT=8080`.
+- **The scripts are bash.** Run `backup.sh` and `restore.sh` from Git Bash, which comes with
+  Git for Windows, or from WSL. For the 30-minute backup, Task Scheduler must call bash
+  directly:
+  ```
+  "C:\Program Files\Git\bin\bash.exe" -lc "cd /c/path/to/playplex && ./scripts/backup.sh"
+  ```
+- Use `mvnw.cmd` rather than `./mvnw` if you ever build the backend outside Docker. Docker
+  itself does not need it.
