@@ -1,0 +1,17 @@
+# Hosting config for the PlayPlex demo (this branch runs the in-browser mock backend).
+# `publish` is relative to `base`, so it resolves to frontend/dist.
+
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# frontend/public/_redirects handles the SPA fallback; this is the same rule, kept
+# here so the site still works if that file is ever dropped from the build.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
