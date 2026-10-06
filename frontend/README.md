@@ -55,6 +55,30 @@ VITE_API_MODE=http npm run dev   # proxies /api to http://localhost:8080
 Nothing else changes: `src/api/client.ts` picks the transport. In `http` mode the demo
 server and demo panel aren't loaded.
 
+## Hosting the built UI (Vercel, Netlify)
+
+This is a single-page app: `/login`, `/floor` and `/admin/reports` are React Router routes,
+not files on disk. A static host knows nothing about them, so opening one directly — or
+pressing refresh on one — returns 404 unless the host is told to serve `index.html` for any
+path it cannot find. Everything still works while you click around, because that navigation
+never leaves the page; the 404 only shows up on a reload or a pasted link, which is exactly
+when someone else is looking.
+
+There are **two** `vercel.json` files, and which one applies depends on one dashboard setting:
+
+| Vercel **Root Directory** | File that is read |
+|---|---|
+| `frontend` | `frontend/vercel.json` |
+| blank (repo root) | `vercel.json` at the repo root |
+
+Vercel cannot see outside the Root Directory — [its docs](https://vercel.com/docs/builds/configure-a-build#root-directory)
+say "Your app will not be able to access files outside of that directory." So a repo-root
+`vercel.json` is silently ignored when the Root Directory is `frontend`, which looks
+identical to having no config at all. Both files are committed so either setting works.
+
+`frontend/public/_redirects` does the same job for Netlify; Vite copies `public/` into
+`dist/` verbatim.
+
 ## Layout
 
 ```

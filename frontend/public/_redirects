@@ -1,0 +1,3 @@
+# Single-page app: every route is served by index.html, so deep links like
+# /admin/reports and a refresh on /floor don't 404 on Netlify.
+/*  /index.html  200
